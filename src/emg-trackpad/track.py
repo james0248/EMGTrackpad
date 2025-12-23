@@ -1,31 +1,76 @@
-import pyautogui
+import Quartz
 import time
-import csv
+import sys
 
-fps = 50
-interval = 1 / fps
-filename = "mouse_log_50fps.csv"
 
-print(f"Target: {fps} FPS (interval: {interval:.4f}s)")
-print("Recording started. Press Ctrl+C to stop.")
+def mouse_event_callback(proxy, event_type, event, refcon):
+    ts = f"{time.perf_counter():.6f}"
 
-try:
-    with open(filename, mode="w", newline="") as file:
-        writer = csv.writer(file)
-        writer.writerow(["Timestamp", "X", "Y"])
+    # Scroll event handling
+    if event_type == Quartz.kCGEventScrollWheel:
+        # Precision pixel-based scroll delta
+        scroll_dx = Quartz.CGEventGetDoubleValueField(
+            event, Quartz.kCGScrollWheelEventPointDeltaAxis2
+        )
+        scroll_dy = Quartz.CGEventGetDoubleValueField(
+            event, Quartz.kCGScrollWheelEventPointDeltaAxis1
+        )
 
-        next_capture_time = time.time()
+        if scroll_dy != 0 or scroll_dx != 0:
+            print(f"[{ts}] SCROLL | Pixel: {scroll_dy:10.6f}, {scroll_dx:10.6f}")
 
-        while True:
-            x, y = pyautogui.position()
-            current_time = time.time()
-            writer.writerow([current_time, x, y])
+    # Cursor movement or drag event handling
+    elif event_type in [Quartz.kCGEventMouseMoved, Quartz.kCGEventLeftMouseDragged]:
+        dx = Quartz.CGEventGetDoubleValueField(event, Quartz.kCGMouseEventDeltaX)
+        dy = Quartz.CGEventGetDoubleValueField(event, Quartz.kCGMouseEventDeltaY)
 
-            next_capture_time += interval
+        if dx != 0 or dy != 0:
+            status = "MOVE" if event_type == Quartz.kCGEventMouseMoved else "DRAG"
+            print(f"[{ts}] {status} | dx: {dx:10.6f}, dy: {dy:10.6f}")
 
-            sleep_time = next_capture_time - time.time()
-            if sleep_time > 0:
-                time.sleep(sleep_time)
+    return event
 
-except KeyboardInterrupt:
-    print("\nRecording stopped.")
+
+def run_event_capture():
+    # Define which events to listen to using a bitmask
+    event_mask = (
+        Quartz.CGEventMaskBit(Quartz.kCGEventMouseMoved)
+        | Quartz.CGEventMaskBit(Quartz.kCGEventLeftMouseDown)
+        | Quartz.CGEventMaskBit(Quartz.kCGEventLeftMouseUp)
+        | Quartz.CGEventMaskBit(Quartz.kCGEventLeftMouseDragged)
+        | Quartz.CGEventMaskBit(Quartz.kCGEventScrollWheel)
+    )
+
+    # Create an event tap to intercept system-level events
+    event_tap = Quartz.CGEventTapCreate(
+        Quartz.kCGSessionEventTap,
+        Quartz.kCGHeadInsertEventTap,
+        Quartz.kCGEventTapOptionDefault,
+        event_mask,
+        mouse_event_callback,
+        None,
+    )
+
+    if not event_tap:
+        print(
+            "Error: Unable to create event tap. Please check 'Accessibility' permissions in System Settings."
+        )
+        sys.exit(1)
+
+    # Create a run loop source and add it to the current run loop
+    run_loop_source = Quartz.CFMachPortCreateRunLoopSource(None, event_tap, 0)
+    loop = Quartz.CFRunLoopGetCurrent()
+    Quartz.CFRunLoopAddSource(loop, run_loop_source, Quartz.kCFRunLoopDefaultMode)
+
+    # Enable the event tap
+    Quartz.CGEventTapEnable(event_tap, True)
+
+    print("Quartz Precision Collector Running... (Press Ctrl+C to stop)")
+    try:
+        Quartz.CFRunLoopRun()
+    except KeyboardInterrupt:
+        print("\nStopping collection. Exit.")
+
+
+if __name__ == "__main__":
+    run_event_capture()
