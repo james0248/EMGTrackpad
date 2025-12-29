@@ -1,29 +1,32 @@
+import prand, { type RandomGenerator } from "pure-rand";
+
 /**
- * Seeded pseudo-random number generator (Mulberry32)
- * Simple, fast, and produces decent quality randomness for our use case.
+ * Seeded pseudo-random number generator using pure-rand (xoroshiro128+)
+ * Wraps pure-rand's immutable API in a mutable class for convenience.
  */
 export class PRNG {
-  private state: number;
+  private rng: RandomGenerator;
 
   constructor(seed: number) {
-    this.state = seed;
+    this.rng = prand.xoroshiro128plus(seed);
   }
 
   /**
    * Returns a random float in [0, 1)
    */
   next(): number {
-    let t = (this.state += 0x6d2b79f5);
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    const [value, nextRng] = prand.uniformIntDistribution(0, 0x7fffffff, this.rng);
+    this.rng = nextRng;
+    return value / 0x80000000;
   }
 
   /**
    * Returns a random integer in [min, max] inclusive
    */
   nextInt(min: number, max: number): number {
-    return Math.floor(this.next() * (max - min + 1)) + min;
+    const [value, nextRng] = prand.uniformIntDistribution(min, max, this.rng);
+    this.rng = nextRng;
+    return value;
   }
 
   /**
@@ -63,5 +66,5 @@ export class PRNG {
  * Generate a random seed based on current time
  */
 export function generateSeed(): number {
-  return Math.floor(Math.random() * 2147483647);
+  return Math.floor(Math.random() * 0x7fffffff);
 }

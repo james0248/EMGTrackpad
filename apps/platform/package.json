@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "bun-plugin-tailwind": "^0.1.2",
+    "pure-rand": "^7.0.1",
     "react": "^19",
     "react-dom": "^19",
     "tailwindcss": "^4.1.11"
