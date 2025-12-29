@@ -1,187 +1,193 @@
-import os
 import sys
 import time
+import threading
+import logging
+from datetime import datetime
+from pathlib import Path
 
 import h5py
 import numpy as np
 import Quartz
+from mindrove.board_shim import BoardIds, BoardShim, MindRoveInputParams
 
-FILENAME = "mouse_log.h5"
-BUFFER_SIZE = 100  # Flush every BUFFER_SIZE events
+# Constants
+BOARD_ID = BoardIds.MINDROVE_WIFI_BOARD
+MOUSE_BUFFER_SIZE = 100
 
-# Map event codes to numbers
-EVT_LEFT_DOWN = 1.0
-EVT_LEFT_UP = 2.0
-EVT_L_DRAG = 3.0
-EVT_RIGHT_DOWN = 4.0
-EVT_RIGHT_UP = 5.0
-EVT_R_DRAG = 6.0
-EVT_SCROLL = 7.0
-EVT_MOVE = 8.0
+# Event Code Mapping
+EVENT_MAP = {
+    Quartz.kCGEventLeftMouseDown: 1.0,  # LEFT_DOWN
+    Quartz.kCGEventLeftMouseUp: 2.0,  # LEFT_UP
+    Quartz.kCGEventLeftMouseDragged: 3.0,  # L_DRAG
+    Quartz.kCGEventRightMouseDown: 4.0,  # RIGHT_DOWN
+    Quartz.kCGEventRightMouseUp: 5.0,  # RIGHT_UP
+    Quartz.kCGEventRightMouseDragged: 6.0,  # R_DRAG
+    Quartz.kCGEventScrollWheel: 7.0,  # SCROLL
+    Quartz.kCGEventMouseMoved: 8.0,  # MOVE
+}
 
-data_buffer = []
 
+class DataCollector:
+    def __init__(self):
+        self.stop_event = threading.Event()
+        self.lock = threading.Lock()
+        self.mouse_buffer = []
 
-def init_storage():
-    if not os.path.exists(FILENAME):
-        with h5py.File(FILENAME, "w") as f:
-            # maxshape=(None, 4) means the dataset can grow
-            dset = f.create_dataset(
-                "mouse_events",
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+        self.logger = logging.getLogger("Collector")
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        data_dir = Path("data")
+        data_dir.mkdir(exist_ok=True)
+        self.filepath = data_dir / f"session_{ts}.h5"
+
+    def init_resources(self):
+        # MindRove Setup
+        self.logger.info("Connecting to MindRove...")
+        params = MindRoveInputParams()
+        self.board = BoardShim(BOARD_ID, params)
+        self.board.prepare_session()
+        self.board.start_stream(450000)
+
+        self.emg_channels = BoardShim.get_emg_channels(BOARD_ID)
+        sr = BoardShim.get_sampling_rate(BOARD_ID)
+
+        # Check if data is actually flowing
+        time.sleep(1.0)
+        if self.board.get_board_data_count() == 0:
+            raise RuntimeError("MindRove connected but no data stream.")
+
+        with h5py.File(self.filepath, "w") as f:
+            # Mouse Dataset
+            m_dset = f.create_dataset(
+                "trackpad",
                 shape=(0, 4),
                 maxshape=(None, 4),
-                dtype=np.float64,
-                chunks=True,
+                dtype="f8",
                 compression="gzip",
             )
+            m_dset.attrs["columns"] = "ts, code, dx, dy"
 
-            dset.attrs["columns"] = "Timestamp, EventCode, dx, dy"
-            dset.attrs["codes"] = (
-                "1:L_DOWN, 2:L_UP, 3:L_DRAG, "
-                "4:R_DOWN, 5:R_UP, 6:R_DRAG, "
-                "7:SCROLL, 8:MOVE"
+        self.logger.info(f"Ready. Log file: {self.filepath} (SR: {sr}Hz)")
+
+    def save_chunk(self, name, data):
+        if len(data) == 0:
+            return
+
+        with self.lock:
+            with h5py.File(self.filepath, "a") as f:
+                if name not in f:
+                    # Lazy creation for EMG to match exact column count
+                    cols = data.shape[1]
+                    f.create_dataset(
+                        name,
+                        shape=(0, cols),
+                        maxshape=(None, cols),
+                        dtype="f8",
+                        compression="gzip",
+                    )
+
+                dset = f[name]
+                dset.resize(dset.shape[0] + len(data), axis=0)
+                dset[-len(data) :] = data
+
+    def emg_loop(self):
+        self.logger.info("EMG Worker started.")
+        while not self.stop_event.is_set():
+            time.sleep(0.5)
+
+            data = self.board.get_board_data()
+            if data.size > 0:
+                emg_data = data[self.emg_channels]
+                self.save_chunk("emg", emg_data.T)
+
+    def mouse_callback(self, proxy, type_, event, refcon):
+        code = EVENT_MAP.get(type_)
+        if code is None:
+            return event
+
+        # Handle deltas for scroll differently since it uses a different field
+        if code == 7.0:  # Scroll
+            dx = Quartz.CGEventGetDoubleValueField(
+                event, Quartz.kCGScrollWheelEventPointDeltaAxis2
             )
-            print(f"New file created: {FILENAME}")
+            dy = Quartz.CGEventGetDoubleValueField(
+                event, Quartz.kCGScrollWheelEventPointDeltaAxis1
+            )
+        else:
+            dx = Quartz.CGEventGetDoubleValueField(event, Quartz.kCGMouseEventDeltaX)
+            dy = Quartz.CGEventGetDoubleValueField(event, Quartz.kCGMouseEventDeltaY)
 
+        self.mouse_buffer.append([time.time(), code, dx, dy])
+        if len(self.mouse_buffer) >= MOUSE_BUFFER_SIZE:
+            arr = np.array(self.mouse_buffer, dtype=np.float64)
+            self.mouse_buffer.clear()
+            self.save_chunk("trackpad", arr)
 
-def flush_buffer():
-    global data_buffer
-    if not data_buffer:
-        return
+        return event
 
-    try:
-        new_data = np.array(data_buffer, dtype=np.float64)
+    def run(self):
+        self.init_resources()
 
-        with h5py.File(FILENAME, "a") as f:  # 'a' 모드: 수정/추가
-            dset = f["mouse_events"]
+        # Start EMG thread
+        t = threading.Thread(target=self.emg_loop, daemon=True)
+        t.start()
 
-            current_len = dset.shape[0]
-            add_len = new_data.shape[0]
-
-            dset.resize(current_len + add_len, axis=0)
-            dset[current_len:] = new_data
-
-        print(
-            f" >> [Auto-Save] {len(data_buffer)} events saved. (Total: {current_len + add_len} events)"
+        # Setup Quartz
+        mask = (
+            Quartz.CGEventMaskBit(Quartz.kCGEventMouseMoved)
+            | Quartz.CGEventMaskBit(Quartz.kCGEventLeftMouseDown)
+            | Quartz.CGEventMaskBit(Quartz.kCGEventLeftMouseUp)
+            | Quartz.CGEventMaskBit(Quartz.kCGEventLeftMouseDragged)
+            | Quartz.CGEventMaskBit(Quartz.kCGEventRightMouseDown)
+            | Quartz.CGEventMaskBit(Quartz.kCGEventRightMouseUp)
+            | Quartz.CGEventMaskBit(Quartz.kCGEventRightMouseDragged)
+            | Quartz.CGEventMaskBit(Quartz.kCGEventScrollWheel)
         )
-        data_buffer = []
 
-    except Exception as e:
-        print(f"Error saving: {e}")
-
-
-def mouse_event_callback(proxy, event_type, event, refcon):
-    raw_ts = time.perf_counter()
-    ts_str = f"{raw_ts:.6f}"
-
-    dx = Quartz.CGEventGetDoubleValueField(event, Quartz.kCGMouseEventDeltaX)
-    dy = Quartz.CGEventGetDoubleValueField(event, Quartz.kCGMouseEventDeltaY)
-
-    code = 0.0
-    save_dx, save_dy = 0.0, 0.0
-
-    # 1. Left Mouse
-    if event_type == Quartz.kCGEventLeftMouseDown:
-        code = EVT_LEFT_DOWN
-        print(f"[{ts_str}] LEFT DOWN  | dx: {0.0:10.6f}, dy: {0.0:10.6f}")
-
-    elif event_type == Quartz.kCGEventLeftMouseUp:
-        code = EVT_LEFT_UP
-        print(f"[{ts_str}] LEFT UP    | dx: {0.0:10.6f}, dy: {0.0:10.6f}")
-
-    elif event_type == Quartz.kCGEventLeftMouseDragged:
-        if dx != 0 or dy != 0:
-            code = EVT_L_DRAG
-            save_dx, save_dy = dx, dy
-            print(f"[{ts_str}] L-DRAGGING | dx: {dx:10.6f}, dy: {dy:10.6f}")
-
-    # 2. Right Mouse
-    elif event_type == Quartz.kCGEventRightMouseDown:
-        code = EVT_RIGHT_DOWN
-        print(f"[{ts_str}] RIGHT DOWN | dx: {0.0:10.6f}, dy: {0.0:10.6f}")
-
-    elif event_type == Quartz.kCGEventRightMouseUp:
-        code = EVT_RIGHT_UP
-        print(f"[{ts_str}] RIGHT UP   | dx: {0.0:10.6f}, dy: {0.0:10.6f}")
-
-    elif event_type == Quartz.kCGEventRightMouseDragged:
-        if dx != 0 or dy != 0:
-            code = EVT_R_DRAG
-            save_dx, save_dy = dx, dy
-            print(f"[{ts_str}] R-DRAGGING | dx: {dx:10.6f}, dy: {dy:10.6f}")
-
-    # 3. Scroll
-    elif event_type == Quartz.kCGEventScrollWheel:
-        s_dx = Quartz.CGEventGetDoubleValueField(
-            event, Quartz.kCGScrollWheelEventPointDeltaAxis2
+        tap = Quartz.CGEventTapCreate(
+            Quartz.kCGSessionEventTap,
+            Quartz.kCGHeadInsertEventTap,
+            Quartz.kCGEventTapOptionDefault,
+            mask,
+            self.mouse_callback,
+            self,
         )
-        s_dy = Quartz.CGEventGetDoubleValueField(
-            event, Quartz.kCGScrollWheelEventPointDeltaAxis1
+
+        if not tap:
+            raise PermissionError("Accessibility permission missing!")
+
+        run_loop_src = Quartz.CFMachPortCreateRunLoopSource(None, tap, 0)
+        Quartz.CFRunLoopAddSource(
+            Quartz.CFRunLoopGetCurrent(), run_loop_src, Quartz.kCFRunLoopDefaultMode
         )
-        if s_dy != 0 or s_dx != 0:
-            code = EVT_SCROLL
-            save_dx, save_dy = s_dx, s_dy
-            print(f"[{ts_str}] SCROLL     | dx: {s_dx:10.6f}, dy: {s_dy:10.6f}")
+        Quartz.CGEventTapEnable(tap, True)
 
-    # 4. Move
-    elif event_type == Quartz.kCGEventMouseMoved:
-        if dx != 0 or dy != 0:
-            code = EVT_MOVE
-            save_dx, save_dy = dx, dy
-            print(f"[{ts_str}] MOVE       | dx: {dx:10.6f}, dy: {dy:10.6f}")
+        self.logger.info("Collecting... Ctrl+C to stop.")
+        try:
+            Quartz.CFRunLoopRun()
+        except KeyboardInterrupt:
+            self.logger.info("Stopping...")
+        finally:
+            self.cleanup(t)
 
-    if code != 0.0:
-        data_buffer.append([raw_ts, code, save_dx, save_dy])
-        if len(data_buffer) >= BUFFER_SIZE:
-            flush_buffer()
+    def cleanup(self, emg_thread):
+        if self.mouse_buffer:
+            self.save_chunk("trackpad", np.array(self.mouse_buffer, dtype=np.float64))
 
-    return event
+        self.stop_event.set()
+        emg_thread.join(timeout=2.0)
 
-
-def run_event_capture():
-    init_storage()
-
-    event_mask = (
-        Quartz.CGEventMaskBit(Quartz.kCGEventMouseMoved)
-        | Quartz.CGEventMaskBit(Quartz.kCGEventLeftMouseDown)
-        | Quartz.CGEventMaskBit(Quartz.kCGEventLeftMouseUp)
-        | Quartz.CGEventMaskBit(Quartz.kCGEventLeftMouseDragged)
-        | Quartz.CGEventMaskBit(Quartz.kCGEventRightMouseDown)
-        | Quartz.CGEventMaskBit(Quartz.kCGEventRightMouseUp)
-        | Quartz.CGEventMaskBit(Quartz.kCGEventRightMouseDragged)
-        | Quartz.CGEventMaskBit(Quartz.kCGEventScrollWheel)
-    )
-
-    event_tap = Quartz.CGEventTapCreate(
-        Quartz.kCGSessionEventTap,
-        Quartz.kCGHeadInsertEventTap,
-        Quartz.kCGEventTapOptionDefault,
-        event_mask,
-        mouse_event_callback,
-        None,
-    )
-
-    if not event_tap:
-        print("Error: Accessibility permissions required.")
-        sys.exit(1)
-
-    run_loop_source = Quartz.CFMachPortCreateRunLoopSource(None, event_tap, 0)
-    loop = Quartz.CFRunLoopGetCurrent()
-    Quartz.CFRunLoopAddSource(loop, run_loop_source, Quartz.kCFRunLoopDefaultMode)
-    Quartz.CGEventTapEnable(event_tap, True)
-
-    print(
-        f"Quartz Incremental Save Tracker Running... (Auto-save every {BUFFER_SIZE} events)"
-    )
-    print(f"Logging to: {FILENAME}")
-
-    try:
-        Quartz.CFRunLoopRun()
-    except KeyboardInterrupt:
-        print("\nStopping...")
-        flush_buffer()
-        print("Exit.")
+        if self.board.is_prepared():
+            self.board.stop_stream()
+            self.board.release_session()
+            self.logger.info("Board released.")
 
 
 if __name__ == "__main__":
-    run_event_capture()
+    BoardShim.enable_dev_board_logger()
+    try:
+        DataCollector().run()
+    except Exception as e:
+        print(f"\n[FATAL] {e}")
+        sys.exit(1)
