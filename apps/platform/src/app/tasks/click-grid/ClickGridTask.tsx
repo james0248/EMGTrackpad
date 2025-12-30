@@ -50,18 +50,16 @@ export function ClickGridTask({ spec, onComplete }: ClickGridTaskProps) {
     <div className="flex flex-col items-center gap-6">
       {/* Instructions */}
       <div className="text-center">
-        <h2 className="text-xl font-display font-semibold text-surface-100 mb-2">
+        <h2 className="text-xl font-display font-semibold text-surface-900 mb-2">
           Click Grid Task
         </h2>
-        <p className="text-surface-400">
+        <p className="text-surface-600">
           Click all highlighted squares with the correct mouse button.
-          <span className="ml-2 px-2 py-0.5 bg-cyan-900/50 text-cyan-400 rounded text-sm font-mono">
+          <span className="ml-2 px-2 py-0.5 bg-cyan-100 text-cyan-700 rounded text-sm font-mono">
             L
           </span>
           {" = Left click, "}
-          <span className="px-2 py-0.5 bg-rose-900/50 text-rose-400 rounded text-sm font-mono">
-            R
-          </span>
+          <span className="px-2 py-0.5 bg-rose-100 text-rose-700 rounded text-sm font-mono">R</span>
           {" = Right click"}
         </p>
         <p className="text-surface-500 text-sm mt-1">
@@ -71,7 +69,7 @@ export function ClickGridTask({ spec, onComplete }: ClickGridTaskProps) {
 
       {/* Grid */}
       <div
-        className="grid gap-2 p-4 bg-surface-800 rounded-xl"
+        className="grid gap-2 p-4 bg-surface-200 rounded-xl"
         style={{
           gridTemplateColumns: `repeat(${spec.gridSize}, 1fr)`,
         }}
@@ -103,20 +101,20 @@ function GridCell({ cell, isShaking, onClick }: GridCellProps) {
   };
 
   // Determine cell style
-  let bgClass = "bg-surface-700 border-surface-600";
-  let textClass = "text-surface-500";
+  let bgClass = "bg-surface-100 border-surface-300";
+  let textClass = "text-surface-400";
   let cursor = "cursor-default";
 
   if (cell.active && !cell.done) {
     bgClass =
       cell.requiredButton === "left"
-        ? "bg-cyan-900/60 border-cyan-500 hover:bg-cyan-800/80"
-        : "bg-rose-900/60 border-rose-500 hover:bg-rose-800/80";
-    textClass = cell.requiredButton === "left" ? "text-cyan-300" : "text-rose-300";
+        ? "bg-cyan-100 border-cyan-500 hover:bg-cyan-200"
+        : "bg-rose-100 border-rose-500 hover:bg-rose-200";
+    textClass = cell.requiredButton === "left" ? "text-cyan-700" : "text-rose-700";
     cursor = "cursor-pointer";
   } else if (cell.done) {
-    bgClass = "bg-success-500/30 border-success-500";
-    textClass = "text-success-400";
+    bgClass = "bg-success-100 border-success-500";
+    textClass = "text-success-600";
   }
 
   return (

@@ -110,9 +110,9 @@ function generateScrollMeter(
   prng: PRNG,
   kind: "scroll_meter_horizontal" | "scroll_meter_vertical"
 ): ScrollMeterSpec {
-  // Target band: random position with 10-20% width
-  const bandWidth = prng.nextFloat(10, 20);
-  const targetMin = prng.nextFloat(10, 90 - bandWidth);
+  // Target band: random position with 5-10% width (smaller for precision)
+  const bandWidth = prng.nextFloat(5, 10);
+  const targetMin = prng.nextFloat(15, 85 - bandWidth);
   const targetMax = targetMin + bandWidth;
 
   // Initial value: not in target band

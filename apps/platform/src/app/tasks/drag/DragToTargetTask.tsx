@@ -59,22 +59,23 @@ export function DragToTargetTask({ spec, onComplete }: DragToTargetTaskProps) {
     [spec]
   );
 
-  // Hold timer animation loop
+  // Hold timer animation loop - only starts after release (not while dragging)
   useEffect(() => {
     if (completedRef.current) return;
 
     const inTarget = isInTarget(position.x, position.y);
+    const canStartHold = inTarget && !isDragging;
 
-    if (inTarget && holdProgress.state === "out_of_range") {
-      // Just entered target
+    if (canStartHold && holdProgress.state === "out_of_range") {
+      // Just released in target - start hold timer
       holdStartRef.current = performance.now();
       setHoldProgress({
         state: "in_range_pending",
         startTime: holdStartRef.current,
         progress: 0,
       });
-    } else if (!inTarget && holdProgress.state === "in_range_pending") {
-      // Left target
+    } else if ((!inTarget || isDragging) && holdProgress.state === "in_range_pending") {
+      // Left target OR started dragging again - reset timer
       holdStartRef.current = null;
       setHoldProgress({
         state: "out_of_range",
@@ -116,7 +117,7 @@ export function DragToTargetTask({ spec, onComplete }: DragToTargetTaskProps) {
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [position, holdProgress.state, isInTarget, onComplete]);
+  }, [position, isDragging, holdProgress.state, isInTarget, onComplete]);
 
   // Pointer event handlers
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
@@ -163,12 +164,12 @@ export function DragToTargetTask({ spec, onComplete }: DragToTargetTaskProps) {
     <div className="flex flex-col items-center gap-6 w-full max-w-4xl">
       {/* Instructions */}
       <div className="text-center">
-        <h2 className="text-xl font-display font-semibold text-surface-100 mb-2">Drag Task</h2>
-        <p className="text-surface-400">
-          Drag the circle to the target area and hold for 0.5 seconds.
+        <h2 className="text-xl font-display font-semibold text-surface-900 mb-2">Drag Task</h2>
+        <p className="text-surface-600">
+          Drag the circle to the target area, release, and hold position for 0.5 seconds.
         </p>
         {holdProgress.state === "in_range_pending" && (
-          <p className="text-accent-400 text-sm mt-1 font-mono">
+          <p className="text-accent-600 text-sm mt-1 font-mono">
             Hold: {Math.round(holdProgress.progress * 100)}%
           </p>
         )}
@@ -177,21 +178,21 @@ export function DragToTargetTask({ spec, onComplete }: DragToTargetTaskProps) {
       {/* Playground */}
       <div
         ref={containerRef}
-        className="relative w-full h-96 bg-surface-800 rounded-xl overflow-hidden"
+        className="relative w-full h-96 bg-surface-200 rounded-xl overflow-hidden"
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
       >
         {/* Target area */}
         <div
           className={`absolute rounded-xl border-2 border-dashed transition-colors ${
-            inTarget ? "border-accent-400 bg-accent-500/20" : "border-surface-500 bg-surface-700/50"
+            inTarget ? "border-accent-500 bg-accent-500/20" : "border-surface-400 bg-surface-300/50"
           }`}
           style={targetStyle}
         >
           {/* Hold progress indicator */}
           {holdProgress.state === "in_range_pending" && (
             <div
-              className="absolute bottom-0 left-0 h-1 bg-accent-400 rounded-b-lg hold-indicator"
+              className="absolute bottom-0 left-0 h-1 bg-accent-500 rounded-b-lg hold-indicator"
               style={{ width: `${holdProgress.progress * 100}%` }}
             />
           )}
@@ -201,8 +202,8 @@ export function DragToTargetTask({ spec, onComplete }: DragToTargetTaskProps) {
         <div
           className={`absolute rounded-full cursor-grab transition-shadow ${
             isDragging
-              ? "cursor-grabbing shadow-lg shadow-amber-500/30"
-              : "hover:shadow-md hover:shadow-amber-500/20"
+              ? "cursor-grabbing shadow-lg shadow-amber-500/40"
+              : "hover:shadow-md hover:shadow-amber-500/30"
           } ${
             inTarget
               ? "bg-gradient-to-br from-accent-400 to-accent-600"
@@ -217,7 +218,7 @@ export function DragToTargetTask({ spec, onComplete }: DragToTargetTaskProps) {
           onPointerDown={handlePointerDown}
         >
           {/* Inner circle */}
-          <div className="absolute inset-2 rounded-full bg-white/20" />
+          <div className="absolute inset-2 rounded-full bg-white/30" />
         </div>
       </div>
     </div>

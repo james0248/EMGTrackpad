@@ -145,7 +145,7 @@ export function App() {
   );
 
   return (
-    <div className="flex flex-col h-full bg-surface-900">
+    <div className="flex flex-col h-full bg-surface-50">
       <StatusBar
         session={session}
         onStart={handleStart}
@@ -156,12 +156,12 @@ export function App() {
       <main className="flex-1 flex items-center justify-center overflow-hidden">
         {session.state === "idle" && (
           <div className="text-center">
-            <h1 className="text-4xl font-display font-bold text-surface-100 mb-4">
+            <h1 className="text-4xl font-display font-bold text-surface-900 mb-4">
               EMG Task Playground
             </h1>
-            <p className="text-surface-400 mb-8 max-w-md mx-auto">
+            <p className="text-surface-600 mb-8 max-w-md mx-auto">
               Complete randomized tasks (click, drag, scroll) to collect EMG training data. Press{" "}
-              <kbd className="px-2 py-1 bg-surface-700 rounded text-sm font-mono">Start</kbd> when
+              <kbd className="px-2 py-1 bg-surface-200 rounded text-sm font-mono">Start</kbd> when
               ready.
             </p>
           </div>
@@ -172,40 +172,40 @@ export function App() {
         )}
 
         {session.state === "running" && !session.currentTask && (
-          <div className="text-surface-400 font-mono text-lg">Loading next task...</div>
+          <div className="text-surface-500 font-mono text-lg">Loading next task...</div>
         )}
 
         {session.state === "ended" && (
           <div className="text-center">
-            <h2 className="text-3xl font-display font-bold text-surface-100 mb-4">
+            <h2 className="text-3xl font-display font-bold text-surface-900 mb-4">
               Session Complete
             </h2>
-            <div className="bg-surface-800 rounded-xl p-6 mb-6 inline-block text-left">
-              <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-surface-300">
+            <div className="bg-surface-100 border border-surface-200 rounded-xl p-6 mb-6 inline-block text-left">
+              <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-surface-600">
                 <span>Total Time:</span>
-                <span className="font-mono text-surface-100">{formatTime(session.elapsedMs)}</span>
+                <span className="font-mono text-surface-900">{formatTime(session.elapsedMs)}</span>
                 <span>Tasks Completed:</span>
-                <span className="font-mono text-surface-100">{session.completedTasks}</span>
-                <span className="col-span-2 border-t border-surface-700 my-2"></span>
+                <span className="font-mono text-surface-900">{session.completedTasks}</span>
+                <span className="col-span-2 border-t border-surface-200 my-2"></span>
                 <span>Click Grid:</span>
-                <span className="font-mono text-surface-100">{session.taskCounts.click_grid}</span>
+                <span className="font-mono text-surface-900">{session.taskCounts.click_grid}</span>
                 <span>Drag to Target:</span>
-                <span className="font-mono text-surface-100">
+                <span className="font-mono text-surface-900">
                   {session.taskCounts.drag_to_target}
                 </span>
                 <span>Horizontal Scroll:</span>
-                <span className="font-mono text-surface-100">
+                <span className="font-mono text-surface-900">
                   {session.taskCounts.scroll_meter_horizontal}
                 </span>
                 <span>Vertical Scroll:</span>
-                <span className="font-mono text-surface-100">
+                <span className="font-mono text-surface-900">
                   {session.taskCounts.scroll_meter_vertical}
                 </span>
               </div>
             </div>
             <p className="text-surface-500 text-sm">
               Press{" "}
-              <kbd className="px-2 py-1 bg-surface-700 rounded text-xs font-mono">Restart</kbd> to
+              <kbd className="px-2 py-1 bg-surface-200 rounded text-xs font-mono">Restart</kbd> to
               begin a new session.
             </p>
           </div>

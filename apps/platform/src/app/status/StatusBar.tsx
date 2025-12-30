@@ -11,7 +11,7 @@ export function StatusBar({ session, onStart, onEnd, onRestart }: StatusBarProps
   const { state, elapsedMs, completedTasks, taskCounts, seed } = session;
 
   return (
-    <header className="flex items-center justify-between px-6 py-3 bg-surface-800 border-b border-surface-700 shrink-0">
+    <header className="flex items-center justify-between px-6 py-3 bg-surface-100 border-b border-surface-200 shrink-0">
       {/* Left: Session controls */}
       <div className="flex items-center gap-4">
         {state === "idle" && (
@@ -64,7 +64,7 @@ export function StatusBar({ session, onStart, onEnd, onRestart }: StatusBarProps
         {/* Elapsed time */}
         <div className="flex items-center gap-2">
           <span className="text-surface-500 text-sm">Time:</span>
-          <span className="font-mono text-lg text-surface-100 tabular-nums">
+          <span className="font-mono text-lg text-surface-900 tabular-nums">
             {formatTime(elapsedMs)}
           </span>
         </div>
@@ -72,7 +72,7 @@ export function StatusBar({ session, onStart, onEnd, onRestart }: StatusBarProps
         {/* Total completed */}
         <div className="flex items-center gap-2">
           <span className="text-surface-500 text-sm">Completed:</span>
-          <span className="font-mono text-lg text-surface-100 tabular-nums">{completedTasks}</span>
+          <span className="font-mono text-lg text-surface-900 tabular-nums">{completedTasks}</span>
         </div>
 
         {/* Task breakdown */}
@@ -90,7 +90,7 @@ export function StatusBar({ session, onStart, onEnd, onRestart }: StatusBarProps
       {/* Right: Seed display */}
       <div className="flex items-center gap-2 text-surface-500 text-xs">
         <span>Seed:</span>
-        <code className="font-mono bg-surface-700 px-2 py-1 rounded">{seed}</code>
+        <code className="font-mono bg-surface-200 px-2 py-1 rounded">{seed}</code>
       </div>
     </header>
   );
@@ -104,9 +104,9 @@ interface TaskCountBadgeProps {
 
 function TaskCountBadge({ label, count, color }: TaskCountBadgeProps) {
   const colorClasses = {
-    cyan: "bg-cyan-900/50 text-cyan-400 border-cyan-700",
-    amber: "bg-amber-900/50 text-amber-400 border-amber-700",
-    emerald: "bg-emerald-900/50 text-emerald-400 border-emerald-700",
+    cyan: "bg-cyan-100 text-cyan-700 border-cyan-300",
+    amber: "bg-amber-100 text-amber-700 border-amber-300",
+    emerald: "bg-emerald-100 text-emerald-700 border-emerald-300",
   };
 
   return (

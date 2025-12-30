@@ -38,8 +38,8 @@ body,
   margin: 0;
   padding: 0;
   overflow: hidden;
-  background-color: var(--color-surface-900);
-  color: var(--color-surface-100);
+  background-color: var(--color-surface-50);
+  color: var(--color-surface-900);
   font-family: var(--font-body);
 }
 
