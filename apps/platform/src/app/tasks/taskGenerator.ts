@@ -2,6 +2,8 @@ import type { PRNG } from "../random/prng.ts";
 import type {
   ClickGridCell,
   ClickGridSpec,
+  Draggable,
+  DragTarget,
   DragToTargetSpec,
   ScrollMeterSpec,
   TaskKind,
@@ -43,19 +45,17 @@ export function generateTask(prng: PRNG, lastKinds: string[]): TaskSpec {
   }
 }
 
+// Fixed click grid constants
+const CLICK_GRID_ROWS = 5;
+const CLICK_GRID_COLS = 10;
+const CLICK_GRID_LEFT_COUNT = 6;
+const CLICK_GRID_RIGHT_COUNT = 2;
+
 function generateClickGrid(prng: PRNG): ClickGridSpec {
-  // Grid size between 4x4 and 6x6
-  const gridSize = prng.nextInt(4, 6);
-  const totalCells = gridSize * gridSize;
-
-  // Active ratio between 20% and 50%
-  const activeRatio = prng.nextFloat(0.2, 0.5);
-  const activeCount = Math.max(2, Math.floor(totalCells * activeRatio));
-
-  // Generate cells
+  // Generate cells for rectangular grid (wider than tall)
   const cells: ClickGridCell[] = [];
-  for (let row = 0; row < gridSize; row++) {
-    for (let col = 0; col < gridSize; col++) {
+  for (let row = 0; row < CLICK_GRID_ROWS; row++) {
+    for (let col = 0; col < CLICK_GRID_COLS; col++) {
       cells.push({
         id: `r${row}c${col}`,
         row,
@@ -67,53 +67,156 @@ function generateClickGrid(prng: PRNG): ClickGridSpec {
     }
   }
 
-  // Randomly select active cells
+  // Randomly select active cells (fixed counts: 6 left, 2 right)
   const shuffled = prng.shuffle([...cells]);
-  for (let i = 0; i < activeCount; i++) {
+  const activeCells: ClickGridCell[] = [];
+  for (let i = 0; i < CLICK_GRID_LEFT_COUNT + CLICK_GRID_RIGHT_COUNT; i++) {
     const cell = shuffled[i]!;
     cell.active = true;
-    // Random button requirement: ~60% left, ~40% right
-    cell.requiredButton = prng.nextBool(0.6) ? "left" : "right";
+    cell.requiredButton = i < CLICK_GRID_LEFT_COUNT ? "left" : "right";
+    activeCells.push(cell);
   }
+
+  // Shuffle the active cells to randomize the order they appear
+  const activeOrder = prng.shuffle(activeCells.map((c) => c.id));
 
   return {
     kind: "click_grid",
-    gridSize,
+    rows: CLICK_GRID_ROWS,
+    cols: CLICK_GRID_COLS,
     cells,
+    activeOrder,
   };
+}
+
+// Fixed drag task constants
+const DRAGGABLE_SIZE = 60;
+const TARGET_SIZE = 80; // Circle slightly bigger than draggable
+const DRAG_PAIR_COUNT = 3;
+
+// Color pairs for draggables and targets
+const DRAG_COLORS = [
+  { draggable: "#f59e0b", target: "#fef3c7" }, // Amber
+  { draggable: "#8b5cf6", target: "#ede9fe" }, // Violet
+  { draggable: "#10b981", target: "#d1fae5" }, // Emerald
+  { draggable: "#f43f5e", target: "#ffe4e6" }, // Rose
+  { draggable: "#0ea5e9", target: "#e0f2fe" }, // Sky
+];
+
+interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+function rectsOverlap(a: Rect, b: Rect, padding = 5): boolean {
+  return !(
+    a.x + a.width + padding < b.x ||
+    b.x + b.width + padding < a.x ||
+    a.y + a.height + padding < b.y ||
+    b.y + b.height + padding < a.y
+  );
+}
+
+function generateNonOverlappingPosition(
+  prng: PRNG,
+  width: number,
+  height: number,
+  existingRects: Rect[],
+  maxAttempts = 100
+): { x: number; y: number } | null {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const x = prng.nextFloat(10, 90 - width / 5); // Account for element size in %
+    const y = prng.nextFloat(10, 90 - height / 5);
+
+    const newRect: Rect = { x, y, width: width / 5, height: height / 5 };
+    const overlaps = existingRects.some((r) => rectsOverlap(newRect, r));
+
+    if (!overlaps) {
+      return { x, y };
+    }
+  }
+  return null;
 }
 
 function generateDragToTarget(prng: PRNG): DragToTargetSpec {
-  // Viewport-relative positions (will be scaled in component)
-  const draggableSize = prng.nextInt(50, 80);
-  const targetWidth = prng.nextInt(100, 160);
-  const targetHeight = prng.nextInt(100, 160);
+  const draggables: Draggable[] = [];
+  const targets: DragTarget[] = [];
+  const placedRects: Rect[] = [];
 
-  // Ensure draggable and target don't overlap initially
-  // Positions as percentages of container (10-90% range)
-  const draggableX = prng.nextFloat(10, 40);
-  const draggableY = prng.nextFloat(10, 90);
+  // Shuffle colors for variety
+  const shuffledColors = prng.shuffle([...DRAG_COLORS]);
 
-  const targetX = prng.nextFloat(55, 85);
-  const targetY = prng.nextFloat(10, 90);
+  for (let i = 0; i < DRAG_PAIR_COUNT; i++) {
+    const color = shuffledColors[i % shuffledColors.length]!;
+    const targetId = `target-${i}`;
+    const draggableId = `draggable-${i}`;
+
+    // Place target first
+    const targetPos = generateNonOverlappingPosition(
+      prng,
+      TARGET_SIZE,
+      TARGET_SIZE,
+      placedRects
+    );
+    if (targetPos) {
+      targets.push({
+        id: targetId,
+        color: color.target,
+        position: targetPos,
+      });
+      placedRects.push({
+        x: targetPos.x,
+        y: targetPos.y,
+        width: TARGET_SIZE / 5,
+        height: TARGET_SIZE / 5,
+      });
+    }
+
+    // Place draggable
+    const draggablePos = generateNonOverlappingPosition(
+      prng,
+      DRAGGABLE_SIZE,
+      DRAGGABLE_SIZE,
+      placedRects
+    );
+    if (draggablePos) {
+      draggables.push({
+        id: draggableId,
+        color: color.draggable,
+        position: draggablePos,
+        targetId,
+        done: false,
+      });
+      placedRects.push({
+        x: draggablePos.x,
+        y: draggablePos.y,
+        width: DRAGGABLE_SIZE / 5,
+        height: DRAGGABLE_SIZE / 5,
+      });
+    }
+  }
 
   return {
     kind: "drag_to_target",
-    draggableStart: { x: draggableX, y: draggableY },
-    targetPosition: { x: targetX, y: targetY },
-    targetSize: { width: targetWidth, height: targetHeight },
-    draggableSize,
+    draggables,
+    targets,
+    draggableSize: DRAGGABLE_SIZE,
+    targetSize: TARGET_SIZE,
   };
 }
+
+// Fixed scroll task constants
+const SCROLL_BAND_WIDTH = 8; // Fixed 8% band width
 
 function generateScrollMeter(
   prng: PRNG,
   kind: "scroll_meter_horizontal" | "scroll_meter_vertical"
 ): ScrollMeterSpec {
-  // Target band: random position with 5-10% width (smaller for precision)
-  const bandWidth = prng.nextFloat(5, 10);
-  const targetMin = prng.nextFloat(15, 85 - bandWidth);
-  const targetMax = targetMin + bandWidth;
+  // Target band: random position with fixed width
+  const targetMin = prng.nextFloat(15, 85 - SCROLL_BAND_WIDTH);
+  const targetMax = targetMin + SCROLL_BAND_WIDTH;
 
   // Initial value: not in target band
   let initialValue: number;
@@ -132,6 +235,6 @@ function generateScrollMeter(
     initialValue,
     targetMin,
     targetMax,
-    sensitivity: 0.5, // Adjust based on testing
+    sensitivity: 0.5,
   };
 }

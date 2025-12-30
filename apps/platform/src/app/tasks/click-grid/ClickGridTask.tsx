@@ -8,11 +8,18 @@ interface ClickGridTaskProps {
 
 export function ClickGridTask({ spec, onComplete }: ClickGridTaskProps) {
   const [cells, setCells] = useState<ClickGridCell[]>(spec.cells);
+  const [completedCount, setCompletedCount] = useState(0);
   const [shakingCell, setShakingCell] = useState<string | null>(null);
+
+  // Current target cell ID based on activeOrder
+  const currentTargetId = spec.activeOrder[completedCount] ?? null;
 
   const handleCellClick = useCallback(
     (cellId: string, button: number, e: React.MouseEvent) => {
       e.preventDefault();
+
+      // Only allow clicking the current target
+      if (cellId !== currentTargetId) return;
 
       const clickButton: ClickButton = button === 0 ? "left" : "right";
 
@@ -31,20 +38,23 @@ export function ClickGridTask({ spec, onComplete }: ClickGridTaskProps) {
           }
         });
 
-        // Check if all active cells are done
-        const allDone = newCells.every((cell) => !cell.active || cell.done);
-        if (allDone) {
-          setTimeout(onComplete, 100);
+        // Check if the clicked cell was completed
+        const clickedCell = newCells.find((c) => c.id === cellId);
+        if (clickedCell?.done) {
+          const newCount = completedCount + 1;
+          setCompletedCount(newCount);
+
+          // Check if all done
+          if (newCount >= spec.activeOrder.length) {
+            setTimeout(onComplete, 100);
+          }
         }
 
         return newCells;
       });
     },
-    [onComplete]
+    [currentTargetId, completedCount, spec.activeOrder.length, onComplete]
   );
-
-  const activeCells = cells.filter((c) => c.active);
-  const doneCells = activeCells.filter((c) => c.done);
 
   return (
     <div className="flex flex-col items-center gap-6">
@@ -54,7 +64,7 @@ export function ClickGridTask({ spec, onComplete }: ClickGridTaskProps) {
           Click Grid Task
         </h2>
         <p className="text-surface-600">
-          Click all highlighted squares with the correct mouse button.
+          Click the highlighted square with the correct mouse button.
           <span className="ml-2 px-2 py-0.5 bg-cyan-100 text-cyan-700 rounded text-sm font-mono">
             L
           </span>
@@ -63,7 +73,7 @@ export function ClickGridTask({ spec, onComplete }: ClickGridTaskProps) {
           {" = Right click"}
         </p>
         <p className="text-surface-500 text-sm mt-1">
-          Progress: {doneCells.length} / {activeCells.length}
+          Progress: {completedCount} / {spec.activeOrder.length}
         </p>
       </div>
 
@@ -71,13 +81,14 @@ export function ClickGridTask({ spec, onComplete }: ClickGridTaskProps) {
       <div
         className="grid gap-2 p-4 bg-surface-200 rounded-xl"
         style={{
-          gridTemplateColumns: `repeat(${spec.gridSize}, 1fr)`,
+          gridTemplateColumns: `repeat(${spec.cols}, 1fr)`,
         }}
       >
         {cells.map((cell) => (
           <GridCell
             key={cell.id}
             cell={cell}
+            isCurrent={cell.id === currentTargetId}
             isShaking={shakingCell === cell.id}
             onClick={handleCellClick}
           />
@@ -89,23 +100,24 @@ export function ClickGridTask({ spec, onComplete }: ClickGridTaskProps) {
 
 interface GridCellProps {
   cell: ClickGridCell;
+  isCurrent: boolean;
   isShaking: boolean;
   onClick: (cellId: string, button: number, e: React.MouseEvent) => void;
 }
 
-function GridCell({ cell, isShaking, onClick }: GridCellProps) {
+function GridCell({ cell, isCurrent, isShaking, onClick }: GridCellProps) {
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button === 0 || e.button === 2) {
       onClick(cell.id, e.button, e);
     }
   };
 
-  // Determine cell style
+  // Determine cell style - only show current target as active
   let bgClass = "bg-surface-100 border-surface-300";
   let textClass = "text-surface-400";
   let cursor = "cursor-default";
 
-  if (cell.active && !cell.done) {
+  if (isCurrent && !cell.done) {
     bgClass =
       cell.requiredButton === "left"
         ? "bg-cyan-100 border-cyan-500 hover:bg-cyan-200"
@@ -131,7 +143,7 @@ function GridCell({ cell, isShaking, onClick }: GridCellProps) {
       onMouseDown={handleMouseDown}
       onContextMenu={(e) => e.preventDefault()}
     >
-      {cell.active && !cell.done && (
+      {isCurrent && !cell.done && (
         <span className={textClass}>{cell.requiredButton === "left" ? "L" : "R"}</span>
       )}
       {cell.done && <span className={textClass}>✓</span>}

@@ -19,17 +19,33 @@ export interface ClickGridCell {
 
 export interface ClickGridSpec {
   kind: "click_grid";
-  gridSize: number;
+  rows: number;
+  cols: number;
   cells: ClickGridCell[];
+  activeOrder: string[]; // Cell IDs in the order they should appear
 }
 
 // Drag task types
+export interface DragTarget {
+  id: string;
+  color: string;
+  position: { x: number; y: number };
+}
+
+export interface Draggable {
+  id: string;
+  color: string;
+  position: { x: number; y: number };
+  targetId: string; // which target this draggable should go to
+  done: boolean;
+}
+
 export interface DragToTargetSpec {
   kind: "drag_to_target";
-  draggableStart: { x: number; y: number };
-  targetPosition: { x: number; y: number };
-  targetSize: { width: number; height: number };
+  draggables: Draggable[];
+  targets: DragTarget[];
   draggableSize: number;
+  targetSize: number; // Circle diameter
 }
 
 // Scroll task types
