@@ -1,0 +1,27 @@
+data_dir: data/click
+
+model:
+  _target_: model.rms_mlp.RMSMLPClickClassifier
+  num_channels: 8
+  emg_sample_rate: 500.0
+  hidden_dims: [512, 512, 512]
+  window_length_s: ${training.window_length_s}
+  rms_window_s: 0.02
+
+preprocessing:
+  highpass_freq: 40.0
+  emg_scale: 0.0045
+
+training:
+  window_length_s: 0.2
+  batch_size: 512
+  num_epochs: 500
+  grad_clip_norm: 1.0
+  eval_interval: 10
+  eval_split: 0.1
+  device: mps
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 3e-4
+  weight_decay: 0.01
