@@ -150,37 +150,41 @@ export function ScrollMeterTask({ spec, onComplete }: ScrollMeterTaskProps) {
       {/* Meter container */}
       <div
         ref={containerRef}
-        className={`relative bg-surface-200 rounded-xl overflow-hidden cursor-ns-resize ${isHorizontal ? "w-full h-24" : "w-24 h-96"
-          }`}
+        className={`relative bg-surface-200 rounded-xl overflow-hidden cursor-ns-resize ${
+          isHorizontal ? "w-full h-24" : "w-24 h-96"
+        }`}
         onWheel={handleWheel}
       >
         {/* Track background */}
         <div
-          className={`absolute ${isHorizontal ? "inset-y-4 inset-x-4" : "inset-x-4 inset-y-4"
-            } bg-surface-300 rounded-lg`}
+          className={`absolute ${
+            isHorizontal ? "inset-y-4 inset-x-4" : "inset-x-4 inset-y-4"
+          } bg-surface-300 rounded-lg`}
         />
 
         {/* Target zone */}
         <div
-          className={`absolute rounded-lg bg-accent-500/30 border-2 border-dashed border-accent-500 ${isHorizontal ? "inset-y-4" : "inset-x-4"
-            }`}
+          className={`absolute rounded-lg bg-accent-500/30 border-2 border-dashed border-accent-500 ${
+            isHorizontal ? "inset-y-4" : "inset-x-4"
+          }`}
           style={
             isHorizontal
               ? {
-                left: `calc(${spec.targetMin}% + 16px * ${1 - spec.targetMin / 100})`,
-                width: `${spec.targetMax - spec.targetMin}%`,
-              }
+                  left: `calc(${spec.targetMin}% + 16px * ${1 - spec.targetMin / 100})`,
+                  width: `${spec.targetMax - spec.targetMin}%`,
+                }
               : {
-                bottom: `calc(${spec.targetMin}% + 16px * ${1 - spec.targetMin / 100})`,
-                height: `${spec.targetMax - spec.targetMin}%`,
-              }
+                  bottom: `calc(${spec.targetMin}% + 16px * ${1 - spec.targetMin / 100})`,
+                  height: `${spec.targetMax - spec.targetMin}%`,
+                }
           }
         />
 
         {/* Value indicator - no transition for responsiveness */}
         <div
-          className={`absolute ${isInTarget ? "bg-accent-500" : "bg-amber-500"} ${isHorizontal ? "w-4 inset-y-2 rounded-full" : "h-4 inset-x-2 rounded-full"
-            }`}
+          className={`absolute ${isInTarget ? "bg-accent-500" : "bg-amber-500"} ${
+            isHorizontal ? "w-4 inset-y-2 rounded-full" : "h-4 inset-x-2 rounded-full"
+          }`}
           style={
             isHorizontal ? { left: `calc(${value}% - 8px)` } : { bottom: `calc(${value}% - 8px)` }
           }
@@ -188,10 +192,11 @@ export function ScrollMeterTask({ spec, onComplete }: ScrollMeterTaskProps) {
           {/* Hold progress ring */}
           {holdProgress.state === "in_range_pending" && (
             <div
-              className={`absolute hold-indicator ${isHorizontal
-                ? "inset-x-0 bottom-0 rounded-b-full bg-white/40"
-                : "inset-y-0 left-0 rounded-l-full bg-white/40"
-                }`}
+              className={`absolute hold-indicator ${
+                isHorizontal
+                  ? "inset-x-0 bottom-0 rounded-b-full bg-white/40"
+                  : "inset-y-0 left-0 rounded-l-full bg-white/40"
+              }`}
               style={
                 isHorizontal
                   ? { height: `${holdProgress.progress * 100}%` }
@@ -205,8 +210,9 @@ export function ScrollMeterTask({ spec, onComplete }: ScrollMeterTaskProps) {
         {[0, 25, 50, 75, 100].map((mark) => (
           <div
             key={mark}
-            className={`absolute text-surface-500 text-xs font-mono ${isHorizontal ? "top-0 -translate-x-1/2" : "right-0 translate-y-1/2"
-              }`}
+            className={`absolute text-surface-500 text-xs font-mono ${
+              isHorizontal ? "top-0 -translate-x-1/2" : "right-0 translate-y-1/2"
+            }`}
             style={isHorizontal ? { left: `${mark}%` } : { bottom: `${mark}%` }}
           >
             {mark}

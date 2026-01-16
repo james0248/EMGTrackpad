@@ -1,6 +1,7 @@
 // Task types
 export type TaskKind =
   | "click_grid"
+  | "click_hold"
   | "drag_to_target"
   | "scroll_meter_horizontal"
   | "scroll_meter_vertical";
@@ -57,13 +58,21 @@ export interface ScrollMeterSpec {
   sensitivity: number;
 }
 
-export type TaskSpec = ClickGridSpec | DragToTargetSpec | ScrollMeterSpec;
+// Click hold task types
+export interface ClickHoldSpec {
+  kind: "click_hold";
+  requiredButton: ClickButton;
+  holdDurationMs: number;
+}
+
+export type TaskSpec = ClickGridSpec | ClickHoldSpec | DragToTargetSpec | ScrollMeterSpec;
 
 // Session state
 export type SessionState = "idle" | "running" | "ended";
 
 export interface TaskCounts {
   click_grid: number;
+  click_hold: number;
   drag_to_target: number;
   scroll_meter_horizontal: number;
   scroll_meter_vertical: number;
@@ -77,6 +86,7 @@ export interface SessionData {
   taskCounts: TaskCounts;
   currentTask: TaskSpec | null;
   seed: number;
+  enabledTasks: TaskKind[];
 }
 
 // Hold state for drag/scroll tasks

@@ -2,6 +2,7 @@ import type { PRNG } from "../random/prng.ts";
 import type {
   ClickGridCell,
   ClickGridSpec,
+  ClickHoldSpec,
   Draggable,
   DragTarget,
   DragToTargetSpec,
@@ -10,24 +11,22 @@ import type {
   TaskSpec,
 } from "../types.ts";
 
-const TASK_KINDS: TaskKind[] = [
-  "click_grid",
-  "drag_to_target",
-  "scroll_meter_horizontal",
-  "scroll_meter_vertical",
-];
-
 /**
  * Generate a random task, avoiding streaks (no more than 2 of same kind in a row)
  */
-export function generateTask(prng: PRNG, lastKinds: string[]): TaskSpec {
+export function generateTask(prng: PRNG, lastKinds: string[], enabledTasks: TaskKind[]): TaskSpec {
+  // Filter to only enabled tasks
+  let availableKinds = enabledTasks;
+
   // Filter out kinds that would cause a streak of 3+
-  let availableKinds = TASK_KINDS;
-  if (lastKinds.length >= 2) {
+  if (lastKinds.length >= 2 && availableKinds.length > 1) {
     const last = lastKinds[lastKinds.length - 1];
     const secondLast = lastKinds[lastKinds.length - 2];
     if (last === secondLast) {
-      availableKinds = TASK_KINDS.filter((k) => k !== last);
+      const filtered = availableKinds.filter((k) => k !== last);
+      if (filtered.length > 0) {
+        availableKinds = filtered;
+      }
     }
   }
 
@@ -36,6 +35,8 @@ export function generateTask(prng: PRNG, lastKinds: string[]): TaskSpec {
   switch (kind) {
     case "click_grid":
       return generateClickGrid(prng);
+    case "click_hold":
+      return generateClickHold(prng);
     case "drag_to_target":
       return generateDragToTarget(prng);
     case "scroll_meter_horizontal":
@@ -86,6 +87,14 @@ function generateClickGrid(prng: PRNG): ClickGridSpec {
     cols: CLICK_GRID_COLS,
     cells,
     activeOrder,
+  };
+}
+
+function generateClickHold(prng: PRNG): ClickHoldSpec {
+  return {
+    kind: "click_hold",
+    requiredButton: prng.nextBool() ? "left" : "right",
+    holdDurationMs: prng.nextInt(200, 600),
   };
 }
 
@@ -154,12 +163,7 @@ function generateDragToTarget(prng: PRNG): DragToTargetSpec {
     const draggableId = `draggable-${i}`;
 
     // Place target first
-    const targetPos = generateNonOverlappingPosition(
-      prng,
-      TARGET_SIZE,
-      TARGET_SIZE,
-      placedRects
-    );
+    const targetPos = generateNonOverlappingPosition(prng, TARGET_SIZE, TARGET_SIZE, placedRects);
     if (targetPos) {
       targets.push({
         id: targetId,

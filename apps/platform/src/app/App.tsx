@@ -1,13 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { TaskSelector } from "./config/TaskSelector.tsx";
 import { generateSeed, PRNG } from "./random/prng.ts";
 import { StatusBar } from "./status/StatusBar.tsx";
 import { TaskRunner } from "./tasks/TaskRunner.tsx";
 import { generateTask } from "./tasks/taskGenerator.ts";
-import type { SessionData, TaskSpec } from "./types.ts";
+import type { SessionData, TaskKind, TaskSpec } from "./types.ts";
+
+const ALL_TASK_KINDS: TaskKind[] = [
+  "click_grid",
+  "click_hold",
+  "drag_to_target",
+  "scroll_meter_horizontal",
+  "scroll_meter_vertical",
+];
 
 const INTER_TASK_DELAY_MS = 250;
 
-function createInitialSession(seed: number): SessionData {
+function createInitialSession(seed: number, enabledTasks: TaskKind[]): SessionData {
   return {
     state: "idle",
     startTime: null,
@@ -15,20 +24,31 @@ function createInitialSession(seed: number): SessionData {
     completedTasks: 0,
     taskCounts: {
       click_grid: 0,
+      click_hold: 0,
       drag_to_target: 0,
       scroll_meter_horizontal: 0,
       scroll_meter_vertical: 0,
     },
     currentTask: null,
     seed,
+    enabledTasks,
   };
 }
 
 export function App() {
-  const [session, setSession] = useState<SessionData>(() => createInitialSession(generateSeed()));
+  const [enabledTasks, setEnabledTasks] = useState<TaskKind[]>([...ALL_TASK_KINDS]);
+  const [session, setSession] = useState<SessionData>(() =>
+    createInitialSession(generateSeed(), ALL_TASK_KINDS)
+  );
   const prngRef = useRef<PRNG | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastTaskKindsRef = useRef<string[]>([]);
+
+  const handleToggleTask = useCallback((kind: TaskKind) => {
+    setEnabledTasks((prev) =>
+      prev.includes(kind) ? prev.filter((k) => k !== kind) : [...prev, kind]
+    );
+  }, []);
 
   // Update elapsed time every 100ms while running
   useEffect(() => {
@@ -52,22 +72,25 @@ export function App() {
   const spawnNextTask = useCallback(() => {
     if (!prngRef.current) return;
 
-    const newTask = generateTask(prngRef.current, lastTaskKindsRef.current);
-    lastTaskKindsRef.current = [...lastTaskKindsRef.current.slice(-1), newTask.kind];
-
-    setSession((prev) => ({
-      ...prev,
-      currentTask: newTask,
-    }));
+    setSession((prev) => {
+      const newTask = generateTask(prngRef.current!, lastTaskKindsRef.current, prev.enabledTasks);
+      lastTaskKindsRef.current = [...lastTaskKindsRef.current.slice(-1), newTask.kind];
+      return {
+        ...prev,
+        currentTask: newTask,
+      };
+    });
   }, []);
 
   const handleStart = useCallback(() => {
+    if (enabledTasks.length === 0) return;
+
     const seed = generateSeed();
     prngRef.current = new PRNG(seed);
     lastTaskKindsRef.current = [];
 
     const startTime = performance.now();
-    const firstTask = generateTask(prngRef.current, []);
+    const firstTask = generateTask(prngRef.current, [], enabledTasks);
     lastTaskKindsRef.current = [firstTask.kind];
 
     setSession({
@@ -77,14 +100,16 @@ export function App() {
       completedTasks: 0,
       taskCounts: {
         click_grid: 0,
+        click_hold: 0,
         drag_to_target: 0,
         scroll_meter_horizontal: 0,
         scroll_meter_vertical: 0,
       },
       currentTask: firstTask,
       seed,
+      enabledTasks,
     });
-  }, []);
+  }, [enabledTasks]);
 
   const handleEnd = useCallback(() => {
     setSession((prev) => ({
@@ -95,7 +120,8 @@ export function App() {
   }, []);
 
   const handleRestart = useCallback(() => {
-    setSession(createInitialSession(generateSeed()));
+    setEnabledTasks([...ALL_TASK_KINDS]);
+    setSession(createInitialSession(generateSeed(), ALL_TASK_KINDS));
   }, []);
 
   // Prevent context menu globally during session
@@ -155,15 +181,29 @@ export function App() {
 
       <main className="flex-1 flex items-center justify-center overflow-hidden">
         {session.state === "idle" && (
-          <div className="text-center">
-            <h1 className="text-4xl font-display font-bold text-surface-900 mb-4">
+          <div className="flex flex-col items-center">
+            <h1 className="text-4xl font-display font-bold text-surface-900 mb-2">
               EMG Task Playground
             </h1>
-            <p className="text-surface-600 mb-8 max-w-md mx-auto">
-              Complete randomized tasks (click, drag, scroll) to collect EMG training data. Press{" "}
-              <kbd className="px-2 py-1 bg-surface-200 rounded text-sm font-mono">Start</kbd> when
-              ready.
+            <p className="text-surface-600 mb-6 max-w-md text-center">
+              Configure which tasks to include in your session, then press Start.
             </p>
+            <TaskSelector enabledTasks={enabledTasks} onToggle={handleToggleTask} />
+            <button
+              type="button"
+              onClick={handleStart}
+              disabled={enabledTasks.length === 0}
+              className={`mt-6 px-8 py-3 rounded-lg font-semibold transition-colors ${
+                enabledTasks.length > 0
+                  ? "bg-accent-500 text-white hover:bg-accent-600"
+                  : "bg-surface-200 text-surface-400 cursor-not-allowed"
+              }`}
+            >
+              Start Session
+            </button>
+            {enabledTasks.length === 0 && (
+              <p className="mt-2 text-sm text-danger-500">Select at least one task to start</p>
+            )}
           </div>
         )}
 
@@ -189,6 +229,8 @@ export function App() {
                 <span className="col-span-2 border-t border-surface-200 my-2"></span>
                 <span>Click Grid:</span>
                 <span className="font-mono text-surface-900">{session.taskCounts.click_grid}</span>
+                <span>Click & Hold:</span>
+                <span className="font-mono text-surface-900">{session.taskCounts.click_hold}</span>
                 <span>Drag to Target:</span>
                 <span className="font-mono text-surface-900">
                   {session.taskCounts.drag_to_target}

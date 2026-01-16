@@ -234,8 +234,10 @@ export function DragToTargetTask({ spec, onComplete }: DragToTargetTaskProps) {
           const pos = draggable ? positions[draggable.id] : null;
           const inTarget = draggable && pos ? isInTarget(draggable.id, pos.x, pos.y) : false;
           const isDone = draggable?.done ?? false;
-          const progress = draggable ? holdProgress[draggable.id]?.progress ?? 0 : 0;
-          const isPending = draggable ? holdProgress[draggable.id]?.state === "in_range_pending" : false;
+          const progress = draggable ? (holdProgress[draggable.id]?.progress ?? 0) : 0;
+          const isPending = draggable
+            ? holdProgress[draggable.id]?.state === "in_range_pending"
+            : false;
 
           return (
             <div
@@ -254,10 +256,7 @@ export function DragToTargetTask({ spec, onComplete }: DragToTargetTaskProps) {
             >
               {/* Hold progress indicator - circular ring */}
               {isPending && (
-                <svg
-                  className="absolute inset-0 w-full h-full -rotate-90"
-                  viewBox="0 0 100 100"
-                >
+                <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 100 100">
                   <circle
                     cx="50"
                     cy="50"
