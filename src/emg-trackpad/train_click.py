@@ -1,10 +1,14 @@
 import logging
+import random
 from pathlib import Path
 
 import hydra
+import matplotlib.pyplot as plt
+import numpy as np
 import torch
 import torch.nn as nn
 from datasets.click_dataset import make_click_dataset
+from hydra.core.hydra_config import HydraConfig
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch.utils.data import DataLoader, random_split
@@ -25,6 +29,34 @@ def compute_class_weights(dataloader: DataLoader, num_classes: int = 3) -> torch
     counts = torch.bincount(all_targets, minlength=num_classes).float()
     total = counts.sum()
     return total / (num_classes * counts + 1e-8)
+
+
+def save_confusion_matrix(
+    cm: torch.Tensor, class_names: list[str], save_path: Path
+) -> None:
+    """Save confusion matrix as percentage heatmap image."""
+    cm_np = cm.cpu().numpy()
+    cm_pct = cm_np / cm_np.sum(axis=1, keepdims=True) * 100
+
+    fig, ax = plt.subplots(figsize=(6, 5))
+    im = ax.imshow(cm_pct, cmap="Blues")
+
+    ax.set_xticks(range(len(class_names)))
+    ax.set_yticks(range(len(class_names)))
+    ax.set_xticklabels(class_names)
+    ax.set_yticklabels(class_names)
+    ax.set_xlabel("Predicted")
+    ax.set_ylabel("Actual")
+
+    for i in range(len(class_names)):
+        for j in range(len(class_names)):
+            color = "white" if cm_pct[i, j] > 50 else "black"
+            ax.text(j, i, f"{cm_pct[i, j]:.1f}%", ha="center", va="center", color=color)
+
+    plt.colorbar(im, ax=ax, label="Percentage")
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
 
 
 @torch.no_grad()
@@ -76,11 +108,25 @@ def evaluate(
         metrics[f"recall_{name}"] = recall[c].item()
         metrics[f"f1_{name}"] = f1[c].item()
 
+    # Compute confusion matrix (vectorized)
+    confusion = torch.zeros(num_classes, num_classes, dtype=torch.long, device=preds.device)
+    indices = targets * num_classes + preds
+    confusion.view(-1).scatter_add_(0, indices, torch.ones_like(indices, dtype=torch.long))
+    metrics["confusion_matrix"] = confusion
+
     return metrics
 
 
 @hydra.main(version_base=None, config_path="config", config_name="train_click")
 def train(cfg: DictConfig):
+    # Set random seed for reproducibility
+    if cfg.training.seed is not None:
+        random.seed(cfg.training.seed)
+        np.random.seed(cfg.training.seed)
+        torch.manual_seed(cfg.training.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(cfg.training.seed)
+
     data_dir = Path(cfg.data_dir)
     session_files = list(data_dir.glob("session_*.h5"))
     if not session_files:
@@ -119,6 +165,13 @@ def train(cfg: DictConfig):
     device = get_device(cfg.training.device)
     model.to(device)
 
+    # Setup output directories
+    output_dir = Path(HydraConfig.get().runtime.output_dir)
+    checkpoint_dir = output_dir / "checkpoints"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    plots_dir = output_dir / "plots"
+    plots_dir.mkdir(parents=True, exist_ok=True)
+
     # Optimizer
     optimizer = instantiate(cfg.optimizer, params=model.parameters())
 
@@ -145,9 +198,10 @@ def train(cfg: DictConfig):
             loss = loss_fn(logits, targets)
             loss.backward()
 
-            torch.nn.utils.clip_grad_norm_(
-                model.parameters(), max_norm=cfg.training.grad_clip_norm
-            )
+            if cfg.training.grad_clip_norm:
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), max_norm=cfg.training.grad_clip_norm
+                )
             optimizer.step()
 
             total_loss += loss.item()
@@ -171,8 +225,19 @@ def train(cfg: DictConfig):
                 f"F1 left: {metrics['f1_left']:.4f} | "
                 f"F1 right: {metrics['f1_right']:.4f}"
             )
+            save_confusion_matrix(
+                metrics["confusion_matrix"],
+                CLASS_NAMES,
+                plots_dir / f"confusion_epoch_{epoch + 1:04d}.png",
+            )
 
             model.train()
+
+        # Save checkpoint
+        if (epoch + 1) % cfg.training.save_interval == 0:
+            save_path = checkpoint_dir / f"model_epoch_{epoch + 1:04d}.pt"
+            torch.save(model.state_dict(), save_path)
+            logger.info(f"Saved checkpoint: {save_path}")
 
 
 if __name__ == "__main__":

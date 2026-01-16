@@ -4,21 +4,24 @@ model:
   _target_: model.rms_mlp.RMSMLPClickClassifier
   num_channels: 8
   emg_sample_rate: 500.0
-  hidden_dims: [512, 512, 512]
+  hidden_dims: [256, 256]
   window_length_s: ${training.window_length_s}
   rms_window_s: 0.02
+  dropout: 0.1
 
 preprocessing:
   highpass_freq: 40.0
-  emg_scale: 0.0045
+  emg_scale: 1
 
 training:
+  seed: 42
   window_length_s: 0.2
   batch_size: 512
-  num_epochs: 500
+  num_epochs: 200
   grad_clip_norm: 1.0
   eval_interval: 10
   eval_split: 0.1
+  save_interval: 25
   device: mps
 
 optimizer:
