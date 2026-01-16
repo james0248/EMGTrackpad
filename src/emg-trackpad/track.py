@@ -1,7 +1,7 @@
-import sys
-import time
-import threading
 import logging
+import sys
+import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -14,17 +14,19 @@ from mindrove.board_shim import BoardIds, BoardShim, MindRoveInputParams
 BOARD_ID = BoardIds.MINDROVE_WIFI_BOARD
 MOUSE_BUFFER_SIZE = 100
 
-# Event Code Mapping
-EVENT_MAP = {
-    Quartz.kCGEventLeftMouseDown: 1.0,  # LEFT_DOWN
-    Quartz.kCGEventLeftMouseUp: 2.0,  # LEFT_UP
-    Quartz.kCGEventLeftMouseDragged: 3.0,  # L_DRAG
-    Quartz.kCGEventRightMouseDown: 4.0,  # RIGHT_DOWN
-    Quartz.kCGEventRightMouseUp: 5.0,  # RIGHT_UP
-    Quartz.kCGEventRightMouseDragged: 6.0,  # R_DRAG
-    Quartz.kCGEventScrollWheel: 7.0,  # SCROLL
-    Quartz.kCGEventMouseMoved: 8.0,  # MOVE
-}
+# Event types and their codes
+SCROLL_EVENT_CODE = 7.0
+EVENT_TYPES = [
+    (Quartz.kCGEventLeftMouseDown, 1.0),
+    (Quartz.kCGEventLeftMouseUp, 2.0),
+    (Quartz.kCGEventLeftMouseDragged, 3.0),
+    (Quartz.kCGEventRightMouseDown, 4.0),
+    (Quartz.kCGEventRightMouseUp, 5.0),
+    (Quartz.kCGEventRightMouseDragged, 6.0),
+    (Quartz.kCGEventScrollWheel, SCROLL_EVENT_CODE),
+    (Quartz.kCGEventMouseMoved, 8.0),
+]
+EVENT_MAP = {event_type: code for event_type, code in EVENT_TYPES}
 
 
 class DataCollector:
@@ -50,39 +52,39 @@ class DataCollector:
         self.board.start_stream(450000)
 
         self.emg_channels = BoardShim.get_emg_channels(BOARD_ID)
-        sr = BoardShim.get_sampling_rate(BOARD_ID)
+        self.emg_sample_rate = BoardShim.get_sampling_rate(BOARD_ID)
+        self.timestamp_channel = BoardShim.get_timestamp_channel(BOARD_ID)
 
-        # Check if data is actually flowing
         time.sleep(1.0)
         if self.board.get_board_data_count() == 0:
             raise RuntimeError("MindRove connected but no data stream.")
 
         with h5py.File(self.filepath, "w") as f:
-            # Mouse Dataset
-            m_dset = f.create_dataset(
+            f.attrs["emg_sample_rate_hz"] = self.emg_sample_rate
+            f.create_dataset(
                 "trackpad",
                 shape=(0, 4),
                 maxshape=(None, 4),
                 dtype="f8",
                 compression="gzip",
             )
-            m_dset.attrs["columns"] = "ts, code, dx, dy"
 
-        self.logger.info(f"Ready. Log file: {self.filepath} (SR: {sr}Hz)")
+        self.logger.info(
+            f"Ready. Log file: {self.filepath} "
+            f"(EMG SR: {self.emg_sample_rate}Hz, {len(self.emg_channels)} channels)"
+        )
 
     def save_chunk(self, name, data):
-        if len(data) == 0:
+        if not len(data):
             return
 
         with self.lock:
             with h5py.File(self.filepath, "a") as f:
                 if name not in f:
-                    # Lazy creation for EMG to match exact column count
-                    cols = data.shape[1]
                     f.create_dataset(
                         name,
-                        shape=(0, cols),
-                        maxshape=(None, cols),
+                        shape=(0, data.shape[1]),
+                        maxshape=(None, data.shape[1]),
                         dtype="f8",
                         compression="gzip",
                     )
@@ -93,21 +95,23 @@ class DataCollector:
 
     def emg_loop(self):
         self.logger.info("EMG Worker started.")
+
         while not self.stop_event.is_set():
             time.sleep(0.5)
 
             data = self.board.get_board_data()
-            if data.size > 0:
+            if data.size:
                 emg_data = data[self.emg_channels]
-                self.save_chunk("emg", emg_data.T)
+                timestamps = data[self.timestamp_channel]
+                emg_with_ts = np.column_stack([timestamps, emg_data.T])
+                self.save_chunk("emg", emg_with_ts)
 
     def mouse_callback(self, proxy, type_, event, refcon):
         code = EVENT_MAP.get(type_)
         if code is None:
             return event
 
-        # Handle deltas for scroll differently since it uses a different field
-        if code == 7.0:  # Scroll
+        if code == SCROLL_EVENT_CODE:
             dx = Quartz.CGEventGetDoubleValueField(
                 event, Quartz.kCGScrollWheelEventPointDeltaAxis2
             )
@@ -120,36 +124,25 @@ class DataCollector:
 
         self.mouse_buffer.append([time.time(), code, dx, dy])
         if len(self.mouse_buffer) >= MOUSE_BUFFER_SIZE:
-            arr = np.array(self.mouse_buffer, dtype=np.float64)
+            self.save_chunk("trackpad", np.array(self.mouse_buffer, dtype=np.float64))
             self.mouse_buffer.clear()
-            self.save_chunk("trackpad", arr)
 
         return event
 
     def run(self):
         self.init_resources()
 
-        # Start EMG thread
-        t = threading.Thread(target=self.emg_loop, daemon=True)
-        t.start()
+        emg_thread = threading.Thread(target=self.emg_loop, daemon=True)
+        emg_thread.start()
 
-        # Setup Quartz
-        mask = (
-            Quartz.CGEventMaskBit(Quartz.kCGEventMouseMoved)
-            | Quartz.CGEventMaskBit(Quartz.kCGEventLeftMouseDown)
-            | Quartz.CGEventMaskBit(Quartz.kCGEventLeftMouseUp)
-            | Quartz.CGEventMaskBit(Quartz.kCGEventLeftMouseDragged)
-            | Quartz.CGEventMaskBit(Quartz.kCGEventRightMouseDown)
-            | Quartz.CGEventMaskBit(Quartz.kCGEventRightMouseUp)
-            | Quartz.CGEventMaskBit(Quartz.kCGEventRightMouseDragged)
-            | Quartz.CGEventMaskBit(Quartz.kCGEventScrollWheel)
+        event_mask = sum(
+            Quartz.CGEventMaskBit(event_type) for event_type, _ in EVENT_TYPES
         )
-
         tap = Quartz.CGEventTapCreate(
             Quartz.kCGSessionEventTap,
             Quartz.kCGHeadInsertEventTap,
             Quartz.kCGEventTapOptionDefault,
-            mask,
+            event_mask,
             self.mouse_callback,
             self,
         )
@@ -169,7 +162,7 @@ class DataCollector:
         except KeyboardInterrupt:
             self.logger.info("Stopping...")
         finally:
-            self.cleanup(t)
+            self.cleanup(emg_thread)
 
     def cleanup(self, emg_thread):
         if self.mouse_buffer:
