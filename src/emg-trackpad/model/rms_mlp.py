@@ -14,8 +14,7 @@ class StackedRMSFeatures(nn.Module):
     def forward(self, emg: torch.Tensor) -> torch.Tensor:
         windows = emg.unfold(2, self.window_length, self.window_length)
         rms = torch.sqrt(torch.mean(windows**2, dim=-1) + 1e-8)
-        log_rms = torch.log(rms + 1e-8)
-        return log_rms.flatten(start_dim=1)
+        return rms.flatten(start_dim=1)
 
 
 class RMSMLPModel(nn.Module):
@@ -72,6 +71,7 @@ class RMSMLPClickClassifier(nn.Module):
         emg_sample_rate: float,
         window_length_s: float,
         rms_window_s: float,
+        dropout: float,
     ):
         super().__init__()
 
@@ -83,7 +83,9 @@ class RMSMLPClickClassifier(nn.Module):
 
         input_dim = num_channels * num_windows
         self.mlp = mlp(
-            dims=[input_dim] + hidden_dims + [3], activation=nn.ReLU, dropout=0.1
+            dims=[input_dim] + hidden_dims + [3],
+            activation=nn.ReLU,
+            dropout=dropout,
         )
 
     @property
