@@ -4,7 +4,7 @@ import torch.nn as nn
 from util.mlp import mlp
 
 
-class StackedRMSFeatures(nn.Module):
+class RMSFeatures(nn.Module):
     """Extracts log-scaled RMS features from non-overlapping sub-windows."""
 
     def __init__(self, window_length: int):
@@ -34,7 +34,7 @@ class RMSMLPModel(nn.Module):
         rms_window_samples = int(rms_window_s * emg_sample_rate)
         num_windows = window_samples // rms_window_samples
 
-        self.rms_features = StackedRMSFeatures(rms_window_samples)
+        self.rms_features = RMSFeatures(rms_window_samples)
 
         input_dim = num_channels * num_windows
         self.mlp = mlp([input_dim, *hidden_dims], nn.ReLU, last_activation=nn.ReLU)
@@ -79,13 +79,14 @@ class RMSMLPClickClassifier(nn.Module):
         rms_window_samples = int(rms_window_s * emg_sample_rate)
         num_windows = window_samples // rms_window_samples
 
-        self.rms_features = StackedRMSFeatures(rms_window_samples)
+        self.rms_features = RMSFeatures(rms_window_samples)
 
         input_dim = num_channels * num_windows
         self.mlp = mlp(
             dims=[input_dim] + hidden_dims + [3],
             activation=nn.ReLU,
             dropout=dropout,
+            norm=nn.LayerNorm,
         )
 
     @property
