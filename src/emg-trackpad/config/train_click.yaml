@@ -15,7 +15,8 @@ preprocessing:
 
 training:
   seed: 42
-  window_length_s: 0.2
+  window_length_s: 2.0
+  stride_s: 0.05
   batch_size: 512
   num_epochs: 200
   grad_clip_norm: 1.0
@@ -23,6 +24,7 @@ training:
   eval_split: 0.1
   save_interval: 25
   device: mps
+  use_class_weights: true
 
 optimizer:
   _target_: torch.optim.AdamW

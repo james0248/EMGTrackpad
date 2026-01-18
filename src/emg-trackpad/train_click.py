@@ -138,6 +138,7 @@ def train(cfg: DictConfig):
         window_length_s=cfg.training.window_length_s,
         highpass_freq=cfg.preprocessing.highpass_freq,
         emg_scale=cfg.preprocessing.emg_scale,
+        stride_s=cfg.training.stride_s,
     )
 
     # Split into train and eval
@@ -176,11 +177,14 @@ def train(cfg: DictConfig):
     optimizer = instantiate(cfg.optimizer, params=model.parameters())
 
     # Loss function with optional class weights
-    class_weights = compute_class_weights(train_loader)
-    class_weights = class_weights.to(device)
-    logger.info(f"Class weights: {class_weights.tolist()}")
-
-    loss_fn = nn.CrossEntropyLoss(weight=class_weights)
+    if cfg.training.use_class_weights:
+        class_weights = compute_class_weights(train_loader)
+        class_weights = class_weights.to(device)
+        logger.info(f"Class weights: {class_weights.tolist()}")
+        loss_fn = nn.CrossEntropyLoss(weight=class_weights)
+    else:
+        logger.info("Using unweighted cross-entropy loss")
+        loss_fn = nn.CrossEntropyLoss()
 
     # Training loop
     for epoch in range(cfg.training.num_epochs):
