@@ -5,8 +5,6 @@ import numpy as np
 from scipy.signal import butter, iirnotch, sosfilt, tf2sos
 
 TARGET_RATE_HZ = 50
-DEFAULT_HIGHPASS_FREQ = 40.0
-DEFAULT_FILTER_ORDER = 4
 DEFAULT_NOTCH_FREQ = 60.0
 DEFAULT_NOTCH_Q = 30.0
 BIN_DURATION_S = 1.0 / TARGET_RATE_HZ

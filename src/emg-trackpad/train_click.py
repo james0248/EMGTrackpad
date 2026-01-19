@@ -109,15 +109,19 @@ def evaluate(
         metrics[f"f1_{name}"] = f1[c].item()
 
     # Compute confusion matrix (vectorized)
-    confusion = torch.zeros(num_classes, num_classes, dtype=torch.long, device=preds.device)
+    confusion = torch.zeros(
+        num_classes, num_classes, dtype=torch.long, device=preds.device
+    )
     indices = targets * num_classes + preds
-    confusion.view(-1).scatter_add_(0, indices, torch.ones_like(indices, dtype=torch.long))
+    confusion.view(-1).scatter_add_(
+        0, indices, torch.ones_like(indices, dtype=torch.long)
+    )
     metrics["confusion_matrix"] = confusion
 
     return metrics
 
 
-@hydra.main(version_base=None, config_path="config", config_name="train_click")
+@hydra.main(version_base=None, config_path="config/click")
 def train(cfg: DictConfig):
     # Set random seed for reproducibility
     if cfg.training.seed is not None:

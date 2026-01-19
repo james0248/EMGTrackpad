@@ -1,5 +1,6 @@
-import torch.nn as nn
 from typing import Type
+
+import torch.nn as nn
 
 
 def mlp(

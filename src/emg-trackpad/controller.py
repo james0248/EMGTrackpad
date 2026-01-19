@@ -1,5 +1,6 @@
-import Quartz
 import time
+
+import Quartz
 
 
 class VirtualTrackpad:
