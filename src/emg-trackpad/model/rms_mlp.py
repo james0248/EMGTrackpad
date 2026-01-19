@@ -175,3 +175,59 @@ class RMSMLPClickClassifier(nn.Module):
         features = self.rms_features(emg)
         logits = self.mlp(features)
         return {"click": logits}
+
+
+class FrequencyRMSMLPClickClassifier(nn.Module):
+    """3-class click classifier using frequency-domain RMS features.
+
+    Uses STFT-based frequency band features to capture both temporal and spectral
+    characteristics of EMG signals for detecting discrete click events.
+    """
+
+    def __init__(
+        self,
+        num_channels: int,
+        hidden_dims: list[int],
+        emg_sample_rate: float,
+        window_length_s: float,
+        fft_window: int,
+        fft_stride: int,
+        frequency_bins: list[tuple[float, float]],
+        dropout: float,
+    ):
+        super().__init__()
+
+        window_samples = int(window_length_s * emg_sample_rate)
+        num_time_frames = (window_samples - fft_window) // fft_stride + 1
+        num_bins = len(frequency_bins)
+
+        self.freq_rms_features = FrequencyRMSFeatures(
+            sample_rate=emg_sample_rate,
+            fft_window=fft_window,
+            fft_stride=fft_stride,
+            frequency_bins=frequency_bins,
+        )
+
+        input_dim = num_channels * num_time_frames * num_bins
+        self.mlp = mlp(
+            dims=[input_dim] + hidden_dims + [3],
+            activation=nn.ReLU,
+            dropout=dropout,
+            norm=nn.LayerNorm,
+        )
+
+    @property
+    def device(self) -> torch.device:
+        return next(self.parameters()).device
+
+    def forward(self, emg: torch.Tensor) -> dict[str, torch.Tensor]:
+        """
+        Args:
+            emg: Raw EMG signal (batch, channels, time)
+
+        Returns:
+            Dictionary with 'click' logits (batch, 3)
+        """
+        features = self.freq_rms_features(emg)
+        logits = self.mlp(features)
+        return {"click": logits}

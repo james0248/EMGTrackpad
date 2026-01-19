@@ -1,16 +1,21 @@
 data_dir: data/click
 
 model:
-  _target_: model.rms_mlp.RMSMLPClickClassifier
+  _target_: model.rms_mlp.FrequencyRMSMLPClickClassifier
   num_channels: 8
   emg_sample_rate: 500.0
   hidden_dims: [256, 256]
   window_length_s: ${training.window_length_s}
-  rms_window_s: 0.02
+  fft_window: 64
+  fft_stride: 10
+  frequency_bins:
+    - [0, 32]
+    - [32, 128]
+    - [128, 250]
   dropout: 0.1
 
 preprocessing:
-  highpass_freq: 40.0
+  highpass_freq: 20.0
   emg_scale: 1
 
 training:
@@ -24,7 +29,7 @@ training:
   eval_split: 0.1
   save_interval: 25
   device: mps
-  use_class_weights: true
+  use_class_weights: false
 
 optimizer:
   _target_: torch.optim.AdamW
