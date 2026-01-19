@@ -12,8 +12,9 @@ This project aims to replicate and implement the non-invasive neural interface m
 
 ## 3. Next Goal
 Improve RMS MLP perfomance
-- Apply normalization techniques
-- Apply data augmentation
+- [x] Implement `FrequencyRMSFeature`
+- [ ] Create MLP model using the new feature
+
 
 ## 4. Convention
 - Use `uv` for tooling and executing
