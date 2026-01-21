@@ -6,16 +6,16 @@ This project aims to replicate and implement the non-invasive neural interface m
 ## 2. Done
 - **Data collection:** MindRove EMG → HDF5 with synchronized mouse events
 - **Preprocessing:** 40Hz highpass, 60Hz notch filter
-- **Feature extraction:** RMS with temporal sub-windowing (50ms segments)
-- **Model:** MLP click classifier (8ch → 256 → 256 → 3 classes)
+- **Feature extraction:** RMS with temporal sub-windowing, frequency-binned RMS (STFT)
+- **Models:** RMSMLPClickClassifier, FrequencyRMSMLPClickClassifier (8ch → 256 → 256 → 3 classes)
 - **Training:** Hydra config, class balancing, checkpointing
+- **Inference:** Real-time inference script with MindRove integration
 
 ## 3. Next Goal
-Improve RMS MLP perfomance
-- [x] Implement `FrequencyRMSFeature`
-- [ ] Create MLP model using the new feature
-
+- [ ] Connect inference code to virtual trackpad controller
+- [ ] Add WandB integration
 
 ## 4. Convention
 - Use `uv` for tooling and executing
+    - Install pacakges by running `uv add`
 - Keep `__init__.py` empty
