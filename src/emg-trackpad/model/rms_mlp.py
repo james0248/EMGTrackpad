@@ -97,6 +97,7 @@ class RMSMLPModel(nn.Module):
         emg_sample_rate: float,
         window_length_s: float,
         rms_window_s: float,
+        dropout: float = 0.0,
     ):
         super().__init__()
 
@@ -107,7 +108,13 @@ class RMSMLPModel(nn.Module):
         self.rms_features = RMSFeatures(rms_window_samples)
 
         input_dim = num_channels * num_windows
-        self.mlp = mlp([input_dim, *hidden_dims], nn.ReLU, last_activation=nn.ReLU)
+        self.mlp = mlp(
+            dims=[input_dim, *hidden_dims],
+            activation=nn.ReLU,
+            last_activation=nn.ReLU,
+            dropout=dropout,
+            norm=nn.LayerNorm,
+        )
         self.dxdy_head = nn.Linear(hidden_dims[-1], 2)
         self.actions_head = nn.Linear(hidden_dims[-1], 3)
 
@@ -174,6 +181,60 @@ class RMSMLPClickClassifier(nn.Module):
         features = self.rms_features(emg)
         logits = self.mlp(features)
         return {"click": logits}
+
+
+class FrequencyRMSMLPModel(nn.Module):
+    """MLP model using frequency-domain RMS features for EMG-based cursor control."""
+
+    def __init__(
+        self,
+        num_channels: int,
+        hidden_dims: list[int],
+        emg_sample_rate: float,
+        window_length_s: float,
+        fft_window: int,
+        fft_stride: int,
+        frequency_bins: list[tuple[float, float]],
+        dropout: float = 0.0,
+    ):
+        super().__init__()
+
+        window_samples = int(window_length_s * emg_sample_rate)
+        num_time_frames = (window_samples - fft_window) // fft_stride + 1
+        num_bins = len(frequency_bins)
+
+        self.freq_rms_features = FrequencyRMSFeatures(
+            sample_rate=emg_sample_rate,
+            fft_window=fft_window,
+            fft_stride=fft_stride,
+            frequency_bins=frequency_bins,
+        )
+
+        input_dim = num_channels * num_time_frames * num_bins
+        self.mlp = mlp(
+            dims=[input_dim, *hidden_dims],
+            activation=nn.ReLU,
+            last_activation=nn.ReLU,
+            dropout=dropout,
+            norm=nn.LayerNorm,
+        )
+        self.dxdy_head = nn.Linear(hidden_dims[-1], 2)
+        self.actions_head = nn.Linear(hidden_dims[-1], 3)
+
+    def forward(self, emg: torch.Tensor) -> dict[str, torch.Tensor]:
+        """
+        Args:
+            emg: Raw EMG signal (batch, channels, time)
+
+        Returns:
+            Dictionary with 'dxdy' (cursor movement) and 'actions' (gesture logits)
+        """
+        features = self.freq_rms_features(emg)
+        hidden = self.mlp(features)
+        return {
+            "dxdy": self.dxdy_head(hidden),
+            "actions": self.actions_head(hidden),
+        }
 
 
 class FrequencyRMSMLPClickClassifier(nn.Module):
