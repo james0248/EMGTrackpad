@@ -115,8 +115,14 @@ class RMSMLPModel(nn.Module):
             dropout=dropout,
             norm=nn.LayerNorm,
         )
-        self.dxdy_head = nn.Linear(hidden_dims[-1], 2)
-        self.actions_head = nn.Linear(hidden_dims[-1], 3)
+        self.dxdy_head = mlp(
+            dims=[hidden_dims[-1], hidden_dims[-1], 2],
+            activation=nn.ReLU,
+        )
+        self.actions_head = mlp(
+            dims=[hidden_dims[-1], hidden_dims[-1], 3],
+            activation=nn.ReLU,
+        )
 
     def forward(self, emg: torch.Tensor) -> dict[str, torch.Tensor]:
         """
@@ -218,8 +224,14 @@ class FrequencyRMSMLPModel(nn.Module):
             dropout=dropout,
             norm=nn.LayerNorm,
         )
-        self.dxdy_head = nn.Linear(hidden_dims[-1], 2)
-        self.actions_head = nn.Linear(hidden_dims[-1], 3)
+        self.dxdy_head = mlp(
+            dims=[hidden_dims[-1], hidden_dims[-1], 2],
+            activation=nn.ReLU,
+        )
+        self.actions_head = mlp(
+            dims=[hidden_dims[-1], hidden_dims[-1], 3],
+            activation=nn.ReLU,
+        )
 
     def forward(self, emg: torch.Tensor) -> dict[str, torch.Tensor]:
         """

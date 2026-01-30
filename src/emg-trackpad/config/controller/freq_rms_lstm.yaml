@@ -1,10 +1,9 @@
 data_dir: data/controller
 
 model:
-  _target_: model.rms_mlp.FrequencyRMSMLPModel
+  _target_: model.rms_lstm.FrequencyRMSLSTMModel
   num_channels: 8
   emg_sample_rate: 500.0
-  hidden_dims: [512, 512, 512]
   window_length_s: ${training.window_length_s}
   fft_window: 64
   fft_stride: 32
@@ -12,6 +11,9 @@ model:
     - [0, 32]
     - [32, 128]
     - [128, 250]
+  projection_dim: 128
+  lstm_hidden_dim: 128
+  lstm_num_layers: 2
   dropout: 0.1
 
 preprocessing:
@@ -20,7 +22,7 @@ preprocessing:
 
 training:
   seed: 42
-  window_length_s: 2.0
+  window_length_s: 0.5
   stride_s: 0.05
   batch_size: 512
   num_epochs: 200
