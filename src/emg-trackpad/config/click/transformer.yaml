@@ -1,0 +1,34 @@
+data_dir: data/click
+
+model:
+  _target_: model.transformer.STFTTransformerClickClassifier
+  num_channels: 8
+  fft_window: 64
+  fft_stride: 10
+  d_model: 128
+  num_heads: 8
+  num_layers: 4
+  dim_feedforward: 512
+  dropout: 0.1
+
+preprocessing:
+  highpass_freq: 20.0
+  emg_scale: 1
+
+training:
+  seed: 42
+  window_length_s: 2.0
+  stride_s: 0.05
+  batch_size: 256
+  num_epochs: 200
+  grad_clip_norm: 1.0
+  eval_interval: 10
+  eval_split: 0.1
+  save_interval: 25
+  device: mps
+  use_class_weights: false
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 1e-4
+  weight_decay: 0.01
