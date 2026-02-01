@@ -4,7 +4,6 @@ from pathlib import Path
 import hydra
 import numpy as np
 import torch
-from controller import VirtualTrackpad
 from hydra.utils import instantiate
 from mindrove.board_shim import BoardShim
 from omegaconf import DictConfig
@@ -12,7 +11,9 @@ from rich.console import Console
 from rich.live import Live
 from util.device import get_device
 
+from .output_interface import ControllerModelInterface
 from .streaming import EMGStream, RealTimeFilter, SlidingBuffer, load_model_config
+from .trackpad import VirtualTrackpad
 from .visualizer import InferenceState, TerminalVisualizer
 
 
@@ -48,39 +49,15 @@ class ControllerInference:
         self.highpass_freq = model_cfg.preprocessing.highpass_freq
 
     @torch.no_grad()
-    def predict(
-        self,
-        emg_window: np.ndarray,
-        click_threshold: float = 0.5,
-    ) -> tuple[float, float, bool, bool, bool]:
-        """
-        Run inference and return denormalized cursor movement + action states.
-
-        Returns:
-            dx, dy: Denormalized cursor movement in pixels
-            left_click, right_click, scroll: Action states
-        """
+    def forward(self, emg_window: np.ndarray) -> dict[str, torch.Tensor]:
+        """Run model forward pass and return raw output."""
         x = torch.from_numpy(emg_window).float().unsqueeze(0).to(self.device)
-
-        output = self.model(x)  # {"dxdy": (1, 2), "actions": (1, 3)}
-
-        # Denormalize dxdy: convert normalized output back to pixel deltas
-        # Training normalized as: (dxdy - mean) / std
-        # So we reverse: dxdy = normalized * std + mean
-        dxdy_normalized = output["dxdy"].cpu().numpy()[0]
-        dx = dxdy_normalized[0] * self.dxdy_std[0] + self.dxdy_mean[0]
-        dy = dxdy_normalized[1] * self.dxdy_std[1] + self.dxdy_mean[1]
-
-        # Threshold actions (BCEWithLogits -> sigmoid -> threshold)
-        actions = torch.sigmoid(output["actions"]).cpu().numpy()[0]
-        left_click = actions[0] > click_threshold
-        right_click = actions[1] > click_threshold
-        scroll = actions[2] > click_threshold
-
-        return float(dx), float(dy), bool(left_click), bool(right_click), bool(scroll)
+        return self.model(x)
 
 
-@hydra.main(version_base=None, config_path="../config/inference", config_name="controller")
+@hydra.main(
+    version_base=None, config_path="../config/inference", config_name="controller"
+)
 def main(cfg: DictConfig):
     console = Console()
     console.print("[bold]Initializing EMG Controller Inference...[/]")
@@ -101,11 +78,26 @@ def main(cfg: DictConfig):
     buffer = SlidingBuffer(inference.expected_samples, inference.num_channels)
     visualizer = TerminalVisualizer(title="EMG Controller Inference")
     trackpad = VirtualTrackpad()
+    interface = ControllerModelInterface(
+        dxdy_mean=inference.dxdy_mean,
+        dxdy_std=inference.dxdy_std,
+        sensitivity=cfg.sensitivity,
+        click_threshold=cfg.smoothing.click_threshold,
+        click_confidence_threshold=cfg.smoothing.click_confidence_threshold,
+        click_hold_frames=cfg.smoothing.click_hold_frames,
+        scroll_threshold=cfg.smoothing.scroll_threshold,
+        scroll_amount=cfg.smoothing.scroll_amount,
+    )
 
     console.print(f"Model loaded from: {checkpoint_path}")
     console.print(f"Device: {inference.device}")
     console.print(f"dxdy_mean: {inference.dxdy_mean}")
     console.print(f"dxdy_std: {inference.dxdy_std}")
+    console.print(f"Sensitivity: {cfg.sensitivity}")
+    console.print(
+        f"Click smoothing: threshold={cfg.smoothing.click_confidence_threshold}, "
+        f"hold_frames={cfg.smoothing.click_hold_frames}"
+    )
     console.print("[bold]Connecting to MindRove...[/]")
 
     try:
@@ -134,33 +126,23 @@ def main(cfg: DictConfig):
                     and (now - last_inference_time) >= cfg.inference_interval
                 ):
                     window = buffer.get_data()
+                    output = inference.forward(window)
+
+                    # Get raw values for display
                     (
                         current_dx,
                         current_dy,
                         current_left_click,
                         current_right_click,
                         current_scroll,
-                    ) = inference.predict(window, click_threshold=cfg.click_threshold)
+                    ) = interface.get_raw_values(output)
+
+                    # Process through interface and apply to trackpad
+                    command = interface.process(output)
+                    command.apply_to(trackpad)
+
                     visualizer.record_inference()
                     last_inference_time = now
-
-                    # Discard small movements (<= 1px), then scale
-                    dx_rounded = round(current_dx)
-                    dy_rounded = round(current_dy)
-                    if abs(dx_rounded) <= 1:
-                        dx_rounded = 0
-                    if abs(dy_rounded) <= 1:
-                        dy_rounded = 0
-                    dx_scaled = round(dx_rounded * cfg.sensitivity)
-                    dy_scaled = round(dy_rounded * cfg.sensitivity)
-                    scroll_dy = cfg.scroll_amount if current_scroll else 0
-
-                    trackpad.apply(
-                        dx=dx_scaled,
-                        dy=dy_scaled,
-                        is_click_active=current_left_click,
-                        scroll_dy=scroll_dy,
-                    )
 
                 # Update display
                 buffer_fill = min(1.0, buffer.samples_received / buffer.window_samples)

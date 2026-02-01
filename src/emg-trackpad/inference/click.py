@@ -11,7 +11,9 @@ from rich.console import Console
 from rich.live import Live
 from util.device import get_device
 
+from .output_interface import ClickModelInterface
 from .streaming import EMGStream, RealTimeFilter, SlidingBuffer, load_model_config
+from .trackpad import VirtualTrackpad
 from .visualizer import InferenceState, TerminalVisualizer
 
 CLASS_NAMES = ["nothing", "left", "right"]
@@ -45,15 +47,10 @@ class ClickInference:
         self.highpass_freq = model_cfg.preprocessing.highpass_freq
 
     @torch.no_grad()
-    def predict(self, emg_window: np.ndarray) -> tuple[int, np.ndarray]:
+    def forward(self, emg_window: np.ndarray) -> dict[str, torch.Tensor]:
+        """Run model forward pass and return raw output."""
         x = torch.from_numpy(emg_window).float().unsqueeze(0).to(self.device)
-
-        output = self.model(x)
-        logits = output["click"]
-        probs = torch.softmax(logits, dim=-1).squeeze(0).cpu().numpy()
-        pred_class = int(logits.argmax(dim=-1).item())
-
-        return pred_class, probs
+        return self.model(x)
 
 
 @hydra.main(version_base=None, config_path="../config/inference", config_name="click")
@@ -76,9 +73,18 @@ def main(cfg: DictConfig):
     )
     buffer = SlidingBuffer(inference.expected_samples, inference.num_channels)
     visualizer = TerminalVisualizer(title="EMG Click Inference")
+    trackpad = VirtualTrackpad()
+    interface = ClickModelInterface(
+        confidence_threshold=cfg.smoothing.confidence_threshold,
+        hold_frames=cfg.smoothing.hold_frames,
+    )
 
     console.print(f"Model loaded from: {checkpoint_path}")
     console.print(f"Device: {inference.device}")
+    console.print(
+        f"Smoothing: confidence_threshold={cfg.smoothing.confidence_threshold}, "
+        f"hold_frames={cfg.smoothing.hold_frames}"
+    )
     console.print("[bold]Connecting to MindRove...[/]")
 
     try:
@@ -91,6 +97,7 @@ def main(cfg: DictConfig):
         last_inference_time = 0.0
         current_pred = 0
         current_probs = np.array([1.0, 0.0, 0.0])
+        current_command = None
 
         with Live(console=console, refresh_per_second=30) as live:
             while True:
@@ -107,17 +114,23 @@ def main(cfg: DictConfig):
                     and (now - last_inference_time) >= cfg.inference_interval
                 ):
                     window = buffer.get_data()
-                    current_pred, current_probs = inference.predict(window)
+                    output = inference.forward(window)
+                    current_pred, current_probs = interface.get_prediction_info(output)
+                    current_command = interface.process(output)
+                    current_command.apply_to(trackpad)
                     visualizer.record_inference()
                     last_inference_time = now
 
                 # Update display
                 buffer_fill = min(1.0, buffer.samples_received / buffer.window_samples)
+                smoothed_left = (
+                    current_command.is_click_active if current_command else False
+                )
                 state = InferenceState(
                     prediction=current_pred,
                     probs=current_probs.tolist(),
                     class_names=CLASS_NAMES,
-                    left_click=(current_pred == 1),
+                    left_click=smoothed_left,
                     right_click=(current_pred == 2),
                     buffer_ready=buffer.is_ready(),
                     buffer_fill=buffer_fill,

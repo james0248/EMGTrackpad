@@ -84,7 +84,6 @@ class RealTimeFilter:
         self.zi = np.tile(zi_single[:, np.newaxis, :], (1, num_channels, 1))
 
     def filter(self, data: np.ndarray) -> np.ndarray:
-        """Apply filter to incoming chunk, maintaining state."""
         filtered, self.zi = sosfilt(self.sos, data, zi=self.zi, axis=1)
         return filtered
 

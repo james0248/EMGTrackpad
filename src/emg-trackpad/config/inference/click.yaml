@@ -1,3 +1,6 @@
 checkpoint: ???
 device: mps
 inference_interval: 0.1
+smoothing:
+  confidence_threshold: 0.7
+  hold_frames: 2

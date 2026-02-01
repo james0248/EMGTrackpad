@@ -10,9 +10,9 @@ This project aims to replicate and implement the non-invasive neural interface m
 - **Models:** RMSMLPClickClassifier, FrequencyRMSMLPClickClassifier (8ch → 256 → 256 → 3 classes)
 - **Training:** Hydra config, class balancing, checkpointing
 - **Inference:** Real-time inference script with MindRove integration
+- **Output interface:** Model output → TrackpadCommand with click smoothing (confidence threshold + hysteresis)
 
 ## 3. Next Goal
-- [ ] Connect inference code to virtual trackpad controller
 - [ ] Add WandB integration
 
 ## 4. Convention
