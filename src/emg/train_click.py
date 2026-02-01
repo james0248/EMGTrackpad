@@ -7,12 +7,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
-from datasets.click_dataset import make_click_dataset
 from hydra.core.hydra_config import HydraConfig
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch.utils.data import DataLoader, random_split
-from util.device import get_device
+
+from emg.datasets.click_dataset import make_click_dataset
+from emg.util.device import get_device
 
 logger = logging.getLogger(__name__)
 

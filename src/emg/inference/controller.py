@@ -10,11 +10,16 @@ from omegaconf import DictConfig
 from rich.console import Console
 from rich.live import Live
 
-from util.device import get_device
-from .output_interface import ControllerModelInterface
-from .streaming import EMGStream, RealTimeFilter, SlidingBuffer, load_model_config
-from .trackpad import VirtualTrackpad
-from .visualizer import InferenceState, TerminalVisualizer
+from emg.inference.output_interface import ControllerModelInterface
+from emg.inference.streaming import (
+    EMGStream,
+    RealTimeFilter,
+    SlidingBuffer,
+    load_model_config,
+)
+from emg.inference.trackpad import VirtualTrackpad
+from emg.inference.visualizer import InferenceState, TerminalVisualizer
+from emg.util.device import get_device
 
 
 class ControllerInference:

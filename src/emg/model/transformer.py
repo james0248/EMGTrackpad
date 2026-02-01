@@ -4,7 +4,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
-from util.mlp import mlp
+
+from emg.util.mlp import mlp
 
 
 class STFTFeatures(nn.Module):

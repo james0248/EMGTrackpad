@@ -5,7 +5,7 @@ import numpy as np
 import torch
 from torch.utils.data import ConcatDataset, Dataset
 
-from .preprocessing import TARGET_RATE_HZ, preprocess_session
+from emg.datasets.preprocessing import TARGET_RATE_HZ, preprocess_session
 
 
 class ClickSessionDataset(Dataset):

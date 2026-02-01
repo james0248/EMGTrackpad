@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import torch
 
-from .trackpad import ClickState, VirtualTrackpad
+from emg.inference.trackpad import ClickState, VirtualTrackpad
 
 
 @dataclass

@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
 from einops import rearrange
-from util.mlp import mlp
+
+from emg.util.mlp import mlp
 
 
 class RMSFeatures(nn.Module):
