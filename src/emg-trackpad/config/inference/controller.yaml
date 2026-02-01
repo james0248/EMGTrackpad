@@ -1,0 +1,6 @@
+checkpoint: ???
+device: mps
+inference_interval: 0.1
+sensitivity: 1.0
+click_threshold: 0.5
+scroll_amount: 10

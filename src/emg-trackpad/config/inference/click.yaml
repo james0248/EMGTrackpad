@@ -1,0 +1,3 @@
+checkpoint: ???
+device: mps
+inference_interval: 0.1
