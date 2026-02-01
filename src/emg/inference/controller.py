@@ -9,8 +9,8 @@ from mindrove.board_shim import BoardShim
 from omegaconf import DictConfig
 from rich.console import Console
 from rich.live import Live
-from util.device import get_device
 
+from util.device import get_device
 from .output_interface import ControllerModelInterface
 from .streaming import EMGStream, RealTimeFilter, SlidingBuffer, load_model_config
 from .trackpad import VirtualTrackpad
