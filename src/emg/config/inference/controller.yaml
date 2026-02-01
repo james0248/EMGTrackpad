@@ -1,10 +1,10 @@
 checkpoint: ???
 device: mps
 inference_interval: 0.1
-sensitivity: 1.0
+sensitivity: 5.0
 smoothing:
   click_threshold: 0.5
-  click_confidence_threshold: 0.6
+  click_confidence_threshold: 0.5
   click_hold_frames: 2
   scroll_threshold: 0.5
   scroll_amount: 10

@@ -1,7 +1,7 @@
 data_dir: data/click
 
 model:
-  _target_: model.transformer.STFTTransformerClickClassifier
+  _target_: emg.model.transformer.STFTTransformerClickClassifier
   num_channels: 8
   fft_window: 64
   fft_stride: 10

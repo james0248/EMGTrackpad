@@ -1,7 +1,7 @@
 data_dir: data/click
 
 model:
-  _target_: model.rms_mlp.FrequencyRMSMLPClickClassifier
+  _target_: emg.model.rms_mlp.FrequencyRMSMLPClickClassifier
   num_channels: 8
   emg_sample_rate: 500.0
   hidden_dims: [256, 256]

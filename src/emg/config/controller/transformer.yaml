@@ -1,7 +1,7 @@
 data_dir: data/controller
 
 model:
-  _target_: model.transformer.STFTTransformerController
+  _target_: emg.model.transformer.STFTTransformerController
   num_channels: 8
   fft_window: 64
   fft_stride: 32
