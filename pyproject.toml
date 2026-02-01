@@ -21,6 +21,10 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = [
-    "ruff>=0.14.11",
-]
+dev = ["ruff>=0.14.11"]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
