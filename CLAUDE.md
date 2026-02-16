@@ -18,4 +18,5 @@ This project aims to replicate and implement the non-invasive neural interface m
 ## 4. Convention
 - Use `uv` for tooling and executing
     - Install pacakges by running `uv add`
+    - Execute files and commands using `uv run python`
 - Keep `__init__.py` empty
