@@ -107,8 +107,8 @@ class FrequencyRMSLSTMModel(nn.Module):
             dropout=dropout if lstm_num_layers > 1 else 0.0,
         )
 
-        self.dxdy_head = nn.Linear(lstm_hidden_dim, 2)
-        self.actions_head = nn.Linear(lstm_hidden_dim, 3)
+        self.dxdy_head = nn.Linear(lstm_hidden_dim, 4)
+        self.actions_head = nn.Linear(lstm_hidden_dim, 4)
 
     @property
     def device(self) -> torch.device:

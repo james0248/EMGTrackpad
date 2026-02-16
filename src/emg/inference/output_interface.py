@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import torch
 
-from emg.inference.trackpad import ClickState, VirtualTrackpad
+from emg.inference.trackpad import VirtualTrackpad
 
 
 @dataclass
@@ -12,7 +12,7 @@ class TrackpadCommand:
 
     dx: float = 0.0
     dy: float = 0.0
-    click_state: int = 0  # 0=none, 1=left, 2=right (use ClickState enum)
+    click_state: int = 0  # 0=none, 1=left, 2=right
     scroll_dx: float = 0.0
     scroll_dy: float = 0.0
     is_move_enabled: bool = True
@@ -37,56 +37,40 @@ class ClickSmoother:
     Uses confidence threshold and hysteresis to prevent stuttering:
     - Confidence threshold: reject uncertain predictions
     - Hysteresis: require state to persist for N frames before changing
+
+    Tracks unified click state: 0=none, 1=left, 2=right (ClickState values)
     """
 
     def __init__(self, confidence_threshold: float = 0.7, hold_frames: int = 2):
         self.confidence_threshold = confidence_threshold
         self.hold_frames = hold_frames
 
-        self._current_state = False
-        self._pending_state: bool | None = None
+        self._current_state: int = 0
+        self._pending_state: int | None = None
         self._pending_count = 0
 
-    def update(self, is_active: bool, confidence: float) -> bool:
-        """
-        Process a new prediction and return the smoothed state.
-
-        Args:
-            is_active: Whether the click is active according to the model
-            confidence: Confidence score for the prediction (0-1)
-
-        Returns:
-            Smoothed click state
-        """
-        # Low confidence predictions don't change state
+    def update(self, new_state: int, confidence: float) -> int:
         if confidence < self.confidence_threshold:
             self._pending_state = None
             self._pending_count = 0
             return self._current_state
 
         # Check if this is a state change
-        if is_active != self._current_state:
-            if self._pending_state == is_active:
+        if new_state != self._current_state:
+            if self._pending_state == new_state:
                 self._pending_count += 1
                 if self._pending_count >= self.hold_frames:
-                    self._current_state = is_active
+                    self._current_state = new_state
                     self._pending_state = None
                     self._pending_count = 0
             else:
-                self._pending_state = is_active
+                self._pending_state = new_state
                 self._pending_count = 1
         else:
-            # State matches current, reset pending
             self._pending_state = None
             self._pending_count = 0
 
         return self._current_state
-
-    def reset(self) -> None:
-        """Reset smoother state."""
-        self._current_state = False
-        self._pending_state = None
-        self._pending_count = 0
 
 
 class MovementProcessor:
@@ -112,30 +96,17 @@ class MovementProcessor:
         self.dead_zone = dead_zone
 
     def process(self, dxdy_normalized: np.ndarray) -> tuple[int, int]:
-        """
-        Process normalized dxdy output to pixel deltas.
-
-        Args:
-            dxdy_normalized: Normalized model output (2,)
-
-        Returns:
-            (dx, dy) in integer pixels
-        """
-        # Denormalize: dxdy = normalized * std + mean
         dx = dxdy_normalized[0] * self.dxdy_std[0] + self.dxdy_mean[0]
         dy = dxdy_normalized[1] * self.dxdy_std[1] + self.dxdy_mean[1]
 
-        # Dead zone filtering BEFORE rounding
         if abs(dx) <= self.dead_zone:
             dx = 0.0
         if abs(dy) <= self.dead_zone:
             dy = 0.0
 
-        # Round and apply sensitivity
-        dx_int = round(dx * self.sensitivity)
-        dy_int = round(dy * self.sensitivity)
-
-        return dx_int, dy_int
+        dx = dx * self.sensitivity
+        dy = dy * self.sensitivity
+        return dx, dy
 
 
 class ActionProcessor:
@@ -157,37 +128,39 @@ class ActionProcessor:
         self.scroll_amount = scroll_amount
         self.click_smoother = click_smoother
 
-    def process(self, actions_logits: np.ndarray) -> tuple[bool, bool, bool, int]:
-        """
-        Process action logits to boolean states.
+    def process(self, actions_logits: np.ndarray) -> tuple[int, bool, int]:
+        probs = torch.sigmoid(torch.tensor(actions_logits))
 
-        Args:
-            actions_logits: Raw logits from model (3,) for [left, right, scroll]
+        left_prob = float(probs[0])
+        right_prob = float(probs[1])
+        scroll_prob = float(probs[2])
 
-        Returns:
-            (left_click, right_click, scroll_active, scroll_dy)
-        """
-        # Sigmoid to get probabilities
-        probs = 1.0 / (1.0 + np.exp(-actions_logits))
-
-        left_prob = probs[0]
-        right_prob = probs[1]
-        scroll_prob = probs[2]
-
-        # Threshold
-        left_raw = left_prob > self.click_threshold
-        right_click = right_prob > self.click_threshold
-        scroll_active = scroll_prob > self.scroll_threshold
-
-        # Apply smoothing to left click if available
-        if self.click_smoother is not None:
-            left_click = self.click_smoother.update(left_raw, left_prob)
+        # Pick argmax between left and right
+        if left_prob >= right_prob:
+            argmax_state = 1  # ClickState.LEFT
+            argmax_prob = left_prob
         else:
-            left_click = left_raw
+            argmax_state = 2  # ClickState.RIGHT
+            argmax_prob = right_prob
 
+        # Apply threshold gate
+        if argmax_prob > self.click_threshold:
+            predicted_state = argmax_state
+            click_confidence = argmax_prob
+        else:
+            predicted_state = 0  # ClickState.NONE
+            click_confidence = 1.0 - argmax_prob
+
+        # Apply smoothing if available
+        if self.click_smoother is not None:
+            click_state = self.click_smoother.update(predicted_state, click_confidence)
+        else:
+            click_state = predicted_state
+
+        scroll_active = scroll_prob > self.scroll_threshold
         scroll_dy = self.scroll_amount if scroll_active else 0
 
-        return left_click, right_click, scroll_active, scroll_dy
+        return click_state, scroll_active, scroll_dy
 
 
 @dataclass
@@ -202,30 +175,17 @@ class ClickModelInterface:
         self._smoother = ClickSmoother(self.confidence_threshold, self.hold_frames)
 
     def process(self, model_output: dict[str, torch.Tensor]) -> TrackpadCommand:
-        """
-        Process click model output to TrackpadCommand.
-
-        Args:
-            model_output: Dict with "click" key containing logits (1, 3)
-
-        Returns:
-            TrackpadCommand with click state
-        """
         logits = model_output["click"]
         probs = torch.softmax(logits, dim=-1).squeeze(0).cpu().numpy()
         pred_class = int(logits.argmax(dim=-1).item())
 
-        # Class 1 = left click, Class 2 = right click
-        is_left = pred_class == 1
-        is_right = pred_class == 2
-
         # Get confidence for the predicted class
-        confidence = probs[pred_class]
+        confidence = float(probs[pred_class])
 
-        # Apply smoothing to left click
-        smoothed_left = self._smoother.update(is_left, confidence)
+        # Apply smoothing to unified click state (0=none, 1=left, 2=right)
+        smoothed_state = self._smoother.update(pred_class, confidence)
 
-        return TrackpadCommand(click_state=ClickState.LEFT if smoothed_left else ClickState.NONE)
+        return TrackpadCommand(click_state=smoothed_state)
 
     def get_prediction_info(
         self, model_output: dict[str, torch.Tensor]
@@ -235,9 +195,6 @@ class ClickModelInterface:
         probs = torch.softmax(logits, dim=-1).squeeze(0).cpu().numpy()
         pred_class = int(logits.argmax(dim=-1).item())
         return pred_class, probs
-
-    def reset(self) -> None:
-        self._smoother.reset()
 
 
 @dataclass
@@ -286,17 +243,7 @@ class ControllerModelInterface:
 
         # Process actions
         actions_logits = model_output["actions"].cpu().numpy()[0]
-        left_click, right_click, scroll_active, scroll_dy = (
-            self._action_processor.process(actions_logits)
-        )
-
-        # Determine click state (left takes priority if both active)
-        if left_click:
-            click_state = ClickState.LEFT
-        elif right_click:
-            click_state = ClickState.RIGHT
-        else:
-            click_state = ClickState.NONE
+        click_state, _, scroll_dy = self._action_processor.process(actions_logits)
 
         return TrackpadCommand(
             dx=float(dx),
@@ -320,6 +267,3 @@ class ControllerModelInterface:
         scroll = probs[2] > self.scroll_threshold
 
         return float(dx), float(dy), bool(left_click), bool(right_click), bool(scroll)
-
-    def reset(self) -> None:
-        self._action_processor.click_smoother.reset()

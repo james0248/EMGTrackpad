@@ -17,7 +17,7 @@ from emg.util.device import get_device
 
 logger = logging.getLogger(__name__)
 
-ACTION_NAMES = ["left", "right", "scroll"]
+ACTION_NAMES = ["move", "scroll", "left", "right"]
 
 
 def predict_action(logits: torch.Tensor, threshold: float = 0.5) -> torch.Tensor:
@@ -44,7 +44,7 @@ def predict_action(logits: torch.Tensor, threshold: float = 0.5) -> torch.Tensor
     return preds
 
 
-def compute_pos_weights(dataloader: DataLoader, num_actions: int = 3) -> torch.Tensor:
+def compute_pos_weights(dataloader: DataLoader, num_actions: int = 4) -> torch.Tensor:
     """Compute positive class weights for BCEWithLogitsLoss.
 
     Returns:
@@ -309,9 +309,10 @@ def train(cfg: DictConfig):
             )
             logger.info(
                 f"       F1 nothing: {metrics['f1_nothing']:.4f} | "
+                f"F1 move: {metrics['f1_move']:.4f} | "
+                f"F1 scroll: {metrics['f1_scroll']:.4f} | "
                 f"F1 left: {metrics['f1_left']:.4f} | "
-                f"F1 right: {metrics['f1_right']:.4f} | "
-                f"F1 scroll: {metrics['f1_scroll']:.4f}"
+                f"F1 right: {metrics['f1_right']:.4f}"
             )
             save_confusion_matrix(
                 metrics["confusion_matrix"],

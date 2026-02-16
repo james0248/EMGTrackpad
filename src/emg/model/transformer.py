@@ -221,8 +221,8 @@ class STFTTransformerController(STFTTransformerBase):
             dropout=dropout,
         )
         self.ln = nn.LayerNorm(d_model)
-        self.dxdy_head = mlp([d_model, 2], activation=nn.GELU, dropout=dropout)
-        self.actions_head = mlp([d_model, 3], activation=nn.GELU, dropout=dropout)
+        self.dxdy_head = mlp([d_model, 4], activation=nn.GELU, dropout=dropout)
+        self.actions_head = mlp([d_model, 4], activation=nn.GELU, dropout=dropout)
 
     def forward(self, emg: torch.Tensor) -> dict[str, torch.Tensor]:
         cls_output = self.encode(emg)

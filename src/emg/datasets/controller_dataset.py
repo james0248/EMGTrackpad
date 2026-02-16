@@ -12,8 +12,8 @@ class ControllerSessionDataset(Dataset):
     """PyTorch Dataset for EMG-to-controller from a single session.
 
     Each sample consists of an EMG window and the corresponding:
-        - dxdy: Cursor movement (dx, dy)
-        - actions: Binary indicators for [left_click, right_click, scroll]
+        - dxdy: Movement (dx, dy, scroll_dx, scroll_dy)
+        - actions: Binary indicators for [move, scroll, left_click, right_click]
     """
 
     def __init__(
@@ -36,6 +36,7 @@ class ControllerSessionDataset(Dataset):
         self.emg_sample_rate = data["emg_sample_rate"]
         self.bin_edges = data["bin_edges"]
         self.dxdy = data["dxdy"]
+        self.move = data["move"]
         self.left_click = data["left_click"]
         self.right_click = data["right_click"]
         self.scroll = data["scroll"]
@@ -50,8 +51,8 @@ class ControllerSessionDataset(Dataset):
         self.transform = transform
 
         # Normalization parameters (set externally after computing global stats)
-        self.dxdy_mean = dxdy_mean  # (2,) or None
-        self.dxdy_std = dxdy_std  # (2,) or None
+        self.dxdy_mean = dxdy_mean  # (4,) or None
+        self.dxdy_std = dxdy_std  # (4,) or None
 
     def __len__(self) -> int:
         return self.num_windows
@@ -62,8 +63,8 @@ class ControllerSessionDataset(Dataset):
         Returns:
             Dictionary containing:
                 - emg: EMG window tensor, shape (n_channels, window_samples).
-                - dxdy: Normalized cursor movement (dx, dy).
-                - actions: Binary indicators [left_click, right_click, scroll].
+                - dxdy: Normalized movement (dx, dy, scroll_dx, scroll_dy).
+                - actions: Binary indicators [move, scroll, left_click, right_click].
         """
         start_idx = self.stride_samples * idx
         end_idx = start_idx + self.window_samples
@@ -83,11 +84,12 @@ class ControllerSessionDataset(Dataset):
         if self.dxdy_mean is not None:
             dxdy = (dxdy - self.dxdy_mean) / (self.dxdy_std + 1e-8)
 
-        # Actions as binary indicators: [left_click, right_click, scroll]
+        # Actions as binary indicators: [move, scroll, left_click, right_click]
         actions = np.array([
+            self.move[bin_idx],
+            self.scroll[bin_idx],
             self.left_click[bin_idx],
             self.right_click[bin_idx],
-            self.scroll[bin_idx],
         ], dtype=np.float32)
 
         return {
@@ -120,8 +122,8 @@ def make_controller_dataset(
 
     Returns:
         ConcatDataset with additional attributes:
-            - dxdy_mean: Global mean of dxdy values (2,)
-            - dxdy_std: Global std of dxdy values (2,)
+            - dxdy_mean: Global mean of dxdy values (4,) as [dx, dy, scroll_dx, scroll_dy]
+            - dxdy_std: Global std of dxdy values (4,) as [dx, dy, scroll_dx, scroll_dy]
     """
     # First pass: create datasets without normalization
     datasets = [

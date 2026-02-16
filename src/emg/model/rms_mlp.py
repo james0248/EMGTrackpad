@@ -117,11 +117,11 @@ class RMSMLPModel(nn.Module):
             norm=nn.LayerNorm,
         )
         self.dxdy_head = mlp(
-            dims=[hidden_dims[-1], hidden_dims[-1], 2],
+            dims=[hidden_dims[-1], hidden_dims[-1], 4],
             activation=nn.ReLU,
         )
         self.actions_head = mlp(
-            dims=[hidden_dims[-1], hidden_dims[-1], 3],
+            dims=[hidden_dims[-1], hidden_dims[-1], 4],
             activation=nn.ReLU,
         )
 
@@ -226,11 +226,11 @@ class FrequencyRMSMLPModel(nn.Module):
             norm=nn.LayerNorm,
         )
         self.dxdy_head = mlp(
-            dims=[hidden_dims[-1], hidden_dims[-1], 2],
+            dims=[hidden_dims[-1], hidden_dims[-1], 4],
             activation=nn.ReLU,
         )
         self.actions_head = mlp(
-            dims=[hidden_dims[-1], hidden_dims[-1], 3],
+            dims=[hidden_dims[-1], hidden_dims[-1], 4],
             activation=nn.ReLU,
         )
 

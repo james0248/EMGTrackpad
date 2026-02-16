@@ -88,8 +88,14 @@ def build_time_bins(start_time: float, end_time: float) -> np.ndarray:
 def bin_trackpad_events(trackpad: np.ndarray, bin_edges: np.ndarray) -> dict:
     """Aggregate trackpad events into time bins.
 
-    Accumulates cursor movement (dx, dy) within each bin and tracks button
-    states (left click, right click) and scroll events.
+    Accumulates cursor movement (dx, dy) and scroll movement (scroll_dx, scroll_dy)
+    within each bin. Tracks button states (left click, right click), scroll events,
+    and move events.
+
+    Event type separation:
+        - MOVE events: accumulate dx/dy to cursor columns (0-1)
+        - SCROLL events: accumulate dx/dy to scroll columns (2-3)
+        - DRAG events (L_DRAG, R_DRAG): treated like MOVE for cursor dx/dy
 
     Args:
         trackpad: Trackpad event array with columns [timestamp, code, dx, dy].
@@ -97,13 +103,15 @@ def bin_trackpad_events(trackpad: np.ndarray, bin_edges: np.ndarray) -> dict:
 
     Returns:
         Dictionary containing:
-            - dxdy: Accumulated cursor movement per bin, shape (n_bins, 2).
+            - dxdy: Movement per bin, shape (n_bins, 4) as [dx, dy, scroll_dx, scroll_dy].
+            - move: Binary move flag per bin, shape (n_bins,).
             - left_click: Binary left button state per bin, shape (n_bins,).
             - right_click: Binary right button state per bin, shape (n_bins,).
             - scroll: Binary scroll flag per bin, shape (n_bins,).
     """
     n_bins = len(bin_edges) - 1
-    dxdy = np.zeros((n_bins, 2), dtype=np.float32)
+    dxdy = np.zeros((n_bins, 4), dtype=np.float32)
+    move = np.zeros(n_bins, dtype=np.float32)
     left_click = np.zeros(n_bins, dtype=np.float32)
     right_click = np.zeros(n_bins, dtype=np.float32)
     scroll = np.zeros(n_bins, dtype=np.float32)
@@ -114,14 +122,29 @@ def bin_trackpad_events(trackpad: np.ndarray, bin_edges: np.ndarray) -> dict:
     bin_indices = np.searchsorted(bin_edges, ts, side="right") - 1
     bin_indices = np.clip(bin_indices, 0, n_bins - 1)
 
-    # Accumulate dx/dy per bin using vectorized operations
-    np.add.at(dxdy, (bin_indices, 0), trackpad[:, 2])
-    np.add.at(dxdy, (bin_indices, 1), trackpad[:, 3])
-
-    # Mark scroll events
+    # Separate cursor movement (MOVE, L_DRAG, R_DRAG) from scroll movement
+    cursor_mask = (codes == MOVE) | (codes == L_DRAG) | (codes == R_DRAG)
     scroll_mask = codes == SCROLL
+
+    # Accumulate cursor dx/dy (columns 0-1) for MOVE and DRAG events
+    if cursor_mask.any():
+        cursor_indices = bin_indices[cursor_mask]
+        np.add.at(dxdy, (cursor_indices, 0), trackpad[cursor_mask, 2])
+        np.add.at(dxdy, (cursor_indices, 1), trackpad[cursor_mask, 3])
+
+    # Accumulate scroll dx/dy (columns 2-3) for SCROLL events
     if scroll_mask.any():
-        scroll[bin_indices[scroll_mask]] = 1.0
+        scroll_indices = bin_indices[scroll_mask]
+        np.add.at(dxdy, (scroll_indices, 2), trackpad[scroll_mask, 2])
+        np.add.at(dxdy, (scroll_indices, 3), trackpad[scroll_mask, 3])
+        scroll[scroll_indices] = 1.0
+
+    # Mark move events (MOVE or DRAG with nonzero dx/dy)
+    cursor_events_with_motion = cursor_mask & (
+        (trackpad[:, 2] != 0) | (trackpad[:, 3] != 0)
+    )
+    if cursor_events_with_motion.any():
+        move[bin_indices[cursor_events_with_motion]] = 1.0
 
     # Track button states across bins
     current_left = False
@@ -144,6 +167,7 @@ def bin_trackpad_events(trackpad: np.ndarray, bin_edges: np.ndarray) -> dict:
 
     return {
         "dxdy": dxdy,
+        "move": move,
         "left_click": left_click,
         "right_click": right_click,
         "scroll": scroll,
@@ -167,7 +191,8 @@ def preprocess_session(filepath: Path, highpass_freq: float, emg_scale: float) -
             - emg_timestamps: Array of EMG sample timestamps.
             - emg_data: Filtered and scaled EMG data.
             - bin_edges: Time bin edge timestamps at target rate (n_bins + 1).
-            - dxdy: Cursor movement targets per bin, shape (n_bins,).
+            - dxdy: Movement targets per bin, shape (n_bins, 4) as [dx, dy, scroll_dx, scroll_dy].
+            - move: Binary move flag per bin, shape (n_bins,).
             - left_click: Binary left button state per bin, shape (n_bins,).
             - right_click: Binary right button state per bin, shape (n_bins,).
             - scroll: Binary scroll flag per bin, shape (n_bins,).
@@ -201,6 +226,7 @@ def preprocess_session(filepath: Path, highpass_freq: float, emg_scale: float) -
         "emg_data": emg_data,
         "bin_edges": bin_edges,
         "dxdy": targets["dxdy"],
+        "move": targets["move"],
         "left_click": targets["left_click"],
         "right_click": targets["right_click"],
         "scroll": targets["scroll"],
