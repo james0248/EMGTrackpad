@@ -26,6 +26,7 @@ class ControllerSessionDataset(Dataset):
         transform: Callable | None = None,
         dxdy_mean: np.ndarray | None = None,
         dxdy_std: np.ndarray | None = None,
+        jitter: bool = False,
     ):
         data = preprocess_session(
             filepath, highpass_freq=highpass_freq, emg_scale=emg_scale
@@ -45,8 +46,9 @@ class ControllerSessionDataset(Dataset):
         if stride_s is None:
             stride_s = window_length_s
         self.stride_samples = int(stride_s * self.emg_sample_rate)
+        self.max_jitter = self.stride_samples - 1 if jitter else 0
         self.num_windows = (
-            len(self.emg_data) - self.window_samples
+            len(self.emg_data) - self.window_samples - 2 * self.max_jitter
         ) // self.stride_samples + 1
         self.transform = transform
 
@@ -66,7 +68,10 @@ class ControllerSessionDataset(Dataset):
                 - dxdy: Normalized movement (dx, dy, scroll_dx, scroll_dy).
                 - actions: Binary indicators [move, scroll, left_click, right_click].
         """
-        start_idx = self.stride_samples * idx
+        start_idx = self.stride_samples * idx + self.max_jitter
+        if self.max_jitter > 0:
+            jitter = torch.randint(-self.max_jitter, self.max_jitter + 1, (1,)).item()
+            start_idx += jitter
         end_idx = start_idx + self.window_samples
         emg_window = self.emg_data[start_idx:end_idx]
         emg = torch.from_numpy(emg_window.T)
@@ -114,6 +119,7 @@ def make_controller_dataset(
     emg_scale: float = 1.0,
     stride_s: float | None = None,
     transform=None,
+    jitter: bool = False,
 ) -> ConcatDataset:
     """Create a concatenated controller dataset from multiple session files.
 
@@ -134,6 +140,7 @@ def make_controller_dataset(
             emg_scale=emg_scale,
             stride_s=stride_s,
             transform=transform,
+            jitter=jitter,
         )
         for fp in filepaths
     ]

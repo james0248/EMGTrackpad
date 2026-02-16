@@ -197,6 +197,7 @@ def train(cfg: DictConfig):
         highpass_freq=cfg.preprocessing.highpass_freq,
         emg_scale=cfg.preprocessing.emg_scale,
         stride_s=cfg.training.stride_s,
+        jitter=cfg.training.get("jitter", False),
     )
 
     # Log normalization statistics

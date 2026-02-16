@@ -11,8 +11,8 @@ model:
     - [0, 32]
     - [32, 128]
     - [128, 250]
-  projection_dim: 128
-  lstm_hidden_dim: 128
+  projection_dim: 256
+  lstm_hidden_dim: 256
   lstm_num_layers: 2
   dropout: 0.1
 
@@ -34,6 +34,7 @@ training:
   use_class_weights: true
   action_loss_weight: 1.0
   dxdy_loss_weight: 1.0
+  jitter: true
 
 optimizer:
   _target_: torch.optim.AdamW
