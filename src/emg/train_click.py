@@ -13,6 +13,7 @@ from omegaconf import DictConfig
 from torch.utils.data import DataLoader, Subset
 
 from emg.datasets.click_dataset import make_click_dataset
+from emg.datasets.split import split_tail
 from emg.util.device import get_device
 
 logger = logging.getLogger(__name__)
@@ -162,12 +163,14 @@ def train(cfg: DictConfig):
         f"Total data duration: {duration_s:.2f}s ({duration_s / 60:.2f} min, {duration_s / 3600:.2f} h)"
     )
 
-    # Split into train and eval (time-based: front=train, back=eval)
-    eval_split = cfg.training.eval_split
-    n = len(dataset)
-    split = int(n * (1 - eval_split))
-    train_dataset = Subset(dataset, range(split))
-    eval_dataset = Subset(dataset, range(split, n))
+    # Split into train and eval per session (front=train, back=eval)
+    train_idx, eval_idx, stats = split_tail(dataset, cfg.training.eval_split)
+    for s in stats:
+        logger.info(
+            f"Session {s['i']:02d} split: total={s['n']} train={s['tr']} eval={s['ev']}"
+        )
+    train_dataset = Subset(dataset, train_idx)
+    eval_dataset = Subset(dataset, eval_idx)
     train_loader = DataLoader(
         train_dataset,
         batch_size=cfg.training.batch_size,
