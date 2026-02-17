@@ -11,9 +11,9 @@ model:
     - [0, 32]
     - [32, 128]
     - [128, 250]
-  projection_dim: 256
-  lstm_hidden_dim: 256
-  lstm_num_layers: 2
+  projection_dim: 64
+  lstm_hidden_dim: 64
+  lstm_num_layers: 1
   dropout: 0.1
 
 preprocessing:
@@ -22,8 +22,8 @@ preprocessing:
 
 training:
   seed: 42
-  window_length_s: 0.5
-  stride_s: 0.05
+  window_length_s: 2.0
+  stride_s: 0.25
   batch_size: 512
   num_epochs: 200
   grad_clip_norm: 1.0

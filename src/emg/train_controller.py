@@ -175,6 +175,30 @@ def evaluate(
     return metrics
 
 
+def save_loss_plots(
+    train_losses: dict[str, list[float]],
+    val_losses: dict[str, list[float]],
+    val_epochs: list[int],
+    save_path: Path,
+) -> None:
+    """Save train/val loss curves as a figure with 3 subplots."""
+    titles = [("action", "Action Loss"), ("dxdy", "dxdy Loss"), ("all", "Total Loss")]
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+
+    for ax, (key, title) in zip(axes, titles):
+        train_epochs = range(1, len(train_losses[key]) + 1)
+        ax.plot(train_epochs, train_losses[key], label="train")
+        ax.plot(val_epochs, val_losses[key], label="val", marker="o", markersize=3)
+        ax.set_title(title)
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("Loss")
+        ax.legend()
+
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+
+
 @hydra.main(version_base=None, config_path="config/controller")
 def train(cfg: DictConfig):
     # Set random seed for reproducibility
@@ -257,6 +281,11 @@ def train(cfg: DictConfig):
     action_weight = cfg.training.get("action_loss_weight", 1.0)
     dxdy_weight = cfg.training.get("dxdy_loss_weight", 1.0)
 
+    # Loss histories for plotting
+    train_losses = {"action": [], "dxdy": [], "all": []}
+    val_losses = {"action": [], "dxdy": [], "all": []}
+    val_epochs = []
+
     # Training loop
     for epoch in range(cfg.training.num_epochs):
         model.train()
@@ -294,6 +323,10 @@ def train(cfg: DictConfig):
         avg_action_loss = total_action_loss / len(train_loader)
         avg_dxdy_loss = total_dxdy_loss / len(train_loader)
 
+        train_losses["action"].append(avg_action_loss)
+        train_losses["dxdy"].append(avg_dxdy_loss)
+        train_losses["all"].append(avg_loss)
+
         logger.info(
             f"Epoch {epoch + 1:3d}/{cfg.training.num_epochs} | "
             f"Loss: {avg_loss:.4f} (action: {avg_action_loss:.4f}, dxdy: {avg_dxdy_loss:.4f})"
@@ -319,6 +352,17 @@ def train(cfg: DictConfig):
                 metrics["confusion_matrix"],
                 metrics["class_names"],
                 plots_dir / f"confusion_epoch_{epoch + 1:04d}.png",
+            )
+
+            val_epochs.append(epoch + 1)
+            val_losses["action"].append(metrics["action_loss"])
+            val_losses["dxdy"].append(metrics["dxdy_loss"])
+            val_losses["all"].append(
+                metrics["action_loss"] + metrics["dxdy_loss"]
+            )
+            save_loss_plots(
+                train_losses, val_losses, val_epochs,
+                plots_dir / "loss_curves.png",
             )
 
             model.train()
