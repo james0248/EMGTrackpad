@@ -44,8 +44,8 @@ class ControllerInference:
         self.model.eval()
 
         # Load dxdy normalization stats for denormalization
-        self.dxdy_mean = ckpt["dxdy_mean"]  # numpy array (2,)
-        self.dxdy_std = ckpt["dxdy_std"]  # numpy array (2,)
+        self.dxdy_mean = ckpt["dxdy_mean"]  # numpy array (4,)
+        self.dxdy_std = ckpt["dxdy_std"]  # numpy array (4,)
 
         self.num_channels = model_cfg.model.num_channels
         self.emg_sample_rate = model_cfg.model.emg_sample_rate
@@ -88,10 +88,10 @@ def main(cfg: DictConfig):
         dxdy_std=inference.dxdy_std,
         sensitivity=cfg.sensitivity,
         click_threshold=cfg.smoothing.click_threshold,
-        click_confidence_threshold=cfg.smoothing.click_confidence_threshold,
-        click_hold_frames=cfg.smoothing.click_hold_frames,
+        confidence_threshold=cfg.smoothing.confidence_threshold,
+        hold_frames=cfg.smoothing.hold_frames,
         scroll_threshold=cfg.smoothing.scroll_threshold,
-        scroll_amount=cfg.smoothing.scroll_amount,
+        move_threshold=cfg.smoothing.move_threshold,
     )
 
     console.print(f"Model loaded from: {checkpoint_path}")
@@ -100,8 +100,8 @@ def main(cfg: DictConfig):
     console.print(f"dxdy_std: {inference.dxdy_std}")
     console.print(f"Sensitivity: {cfg.sensitivity}")
     console.print(
-        f"Click smoothing: threshold={cfg.smoothing.click_confidence_threshold}, "
-        f"hold_frames={cfg.smoothing.click_hold_frames}"
+        f"Action smoothing: threshold={cfg.smoothing.confidence_threshold}, "
+        f"hold_frames={cfg.smoothing.hold_frames}"
     )
     console.print("[bold]Connecting to MindRove...[/]")
 
@@ -114,7 +114,8 @@ def main(cfg: DictConfig):
 
         last_inference_time = 0.0
         current_dx, current_dy = 0.0, 0.0
-        current_left_click, current_right_click, current_scroll = False, False, False
+        current_move, current_left_click = False, False
+        current_right_click, current_scroll = False, False
 
         with Live(console=console, refresh_per_second=30) as live:
             while True:
@@ -137,6 +138,7 @@ def main(cfg: DictConfig):
                     (
                         current_dx,
                         current_dy,
+                        current_move,
                         current_left_click,
                         current_right_click,
                         current_scroll,
@@ -154,6 +156,7 @@ def main(cfg: DictConfig):
                 state = InferenceState(
                     dx=current_dx,
                     dy=current_dy,
+                    move=current_move,
                     left_click=current_left_click,
                     right_click=current_right_click,
                     scroll=current_scroll,

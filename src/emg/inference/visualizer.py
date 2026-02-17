@@ -19,6 +19,7 @@ class InferenceState:
     dy: float | None = None
 
     # Shared action states
+    move: bool = False
     left_click: bool = False
     right_click: bool = False
     scroll: bool = False
@@ -95,6 +96,7 @@ class TerminalVisualizer:
 
         # Action states (shared)
         table.add_row("", "")
+        table.add_row(*self._format_action_row("Move", state.move))
         table.add_row(*self._format_action_row("Left Click", state.left_click))
         table.add_row(*self._format_action_row("Right Click", state.right_click))
         table.add_row(*self._format_action_row("Scroll", state.scroll))

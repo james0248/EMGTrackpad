@@ -30,7 +30,7 @@ class TrackpadCommand:
         )
 
 
-class ClickSmoother:
+class ActionSmoother:
     """
     Anti-glitch smoothing for click predictions.
 
@@ -95,18 +95,28 @@ class MovementProcessor:
         self.sensitivity = sensitivity
         self.dead_zone = dead_zone
 
-    def process(self, dxdy_normalized: np.ndarray) -> tuple[int, int]:
+    def process(
+        self, dxdy_normalized: np.ndarray
+    ) -> tuple[float, float, float, float]:
         dx = dxdy_normalized[0] * self.dxdy_std[0] + self.dxdy_mean[0]
         dy = dxdy_normalized[1] * self.dxdy_std[1] + self.dxdy_mean[1]
+        scroll_dx = dxdy_normalized[2] * self.dxdy_std[2] + self.dxdy_mean[2]
+        scroll_dy = dxdy_normalized[3] * self.dxdy_std[3] + self.dxdy_mean[3]
 
         if abs(dx) <= self.dead_zone:
             dx = 0.0
         if abs(dy) <= self.dead_zone:
             dy = 0.0
+        if abs(scroll_dx) <= self.dead_zone:
+            scroll_dx = 0.0
+        if abs(scroll_dy) <= self.dead_zone:
+            scroll_dy = 0.0
 
         dx = dx * self.sensitivity
         dy = dy * self.sensitivity
-        return dx, dy
+        scroll_dx = scroll_dx * self.sensitivity
+        scroll_dy = scroll_dy * self.sensitivity
+        return dx, dy, scroll_dx, scroll_dy
 
 
 class ActionProcessor:
@@ -120,20 +130,26 @@ class ActionProcessor:
         self,
         click_threshold: float = 0.5,
         scroll_threshold: float = 0.5,
-        scroll_amount: int = 10,
-        click_smoother: ClickSmoother | None = None,
+        move_threshold: float = 0.5,
+        click_smoother: ActionSmoother | None = None,
+        move_smoother: ActionSmoother | None = None,
+        scroll_smoother: ActionSmoother | None = None,
     ):
         self.click_threshold = click_threshold
         self.scroll_threshold = scroll_threshold
-        self.scroll_amount = scroll_amount
+        self.move_threshold = move_threshold
         self.click_smoother = click_smoother
+        self.move_smoother = move_smoother
+        self.scroll_smoother = scroll_smoother
 
-    def process(self, actions_logits: np.ndarray) -> tuple[int, bool, int]:
+    def process(self, actions_logits: np.ndarray) -> tuple[int, bool, bool]:
+        # Action order: [move, scroll, left, right]
         probs = torch.sigmoid(torch.tensor(actions_logits))
 
-        left_prob = float(probs[0])
-        right_prob = float(probs[1])
-        scroll_prob = float(probs[2])
+        move_prob = float(probs[0])
+        scroll_prob = float(probs[1])
+        left_prob = float(probs[2])
+        right_prob = float(probs[3])
 
         # Pick argmax between left and right
         if left_prob >= right_prob:
@@ -157,10 +173,23 @@ class ActionProcessor:
         else:
             click_state = predicted_state
 
-        scroll_active = scroll_prob > self.scroll_threshold
-        scroll_dy = self.scroll_amount if scroll_active else 0
+        # Move: binary state 0/1
+        move_predicted = 1 if move_prob > self.move_threshold else 0
+        move_confidence = move_prob if move_predicted == 1 else 1.0 - move_prob
+        if self.move_smoother is not None:
+            move_active = self.move_smoother.update(move_predicted, move_confidence) == 1
+        else:
+            move_active = move_predicted == 1
 
-        return click_state, scroll_active, scroll_dy
+        # Scroll: binary state 0/1
+        scroll_predicted = 1 if scroll_prob > self.scroll_threshold else 0
+        scroll_confidence = scroll_prob if scroll_predicted == 1 else 1.0 - scroll_prob
+        if self.scroll_smoother is not None:
+            scroll_active = self.scroll_smoother.update(scroll_predicted, scroll_confidence) == 1
+        else:
+            scroll_active = scroll_predicted == 1
+
+        return click_state, move_active, scroll_active
 
 
 @dataclass
@@ -169,10 +198,10 @@ class ClickModelInterface:
 
     confidence_threshold: float = 0.7
     hold_frames: int = 2
-    _smoother: ClickSmoother = field(init=False)
+    _smoother: ActionSmoother = field(init=False)
 
     def __post_init__(self):
-        self._smoother = ClickSmoother(self.confidence_threshold, self.hold_frames)
+        self._smoother = ActionSmoother(self.confidence_threshold, self.hold_frames)
 
     def process(self, model_output: dict[str, torch.Tensor]) -> TrackpadCommand:
         logits = model_output["click"]
@@ -205,17 +234,23 @@ class ControllerModelInterface:
     dxdy_std: np.ndarray
     sensitivity: float = 1.0
     click_threshold: float = 0.5
-    click_confidence_threshold: float = 0.6
-    click_hold_frames: int = 2
+    confidence_threshold: float = 0.6
+    hold_frames: int = 2
     scroll_threshold: float = 0.5
-    scroll_amount: int = 10
+    move_threshold: float = 0.5
     dead_zone: float = 1.0
     _movement_processor: MovementProcessor = field(init=False)
     _action_processor: ActionProcessor = field(init=False)
 
     def __post_init__(self):
-        click_smoother = ClickSmoother(
-            self.click_confidence_threshold, self.click_hold_frames
+        click_smoother = ActionSmoother(
+            self.confidence_threshold, self.hold_frames
+        )
+        move_smoother = ActionSmoother(
+            self.confidence_threshold, self.hold_frames
+        )
+        scroll_smoother = ActionSmoother(
+            self.confidence_threshold, self.hold_frames
         )
         self._movement_processor = MovementProcessor(
             self.dxdy_mean, self.dxdy_std, self.sensitivity, self.dead_zone
@@ -223,8 +258,10 @@ class ControllerModelInterface:
         self._action_processor = ActionProcessor(
             self.click_threshold,
             self.scroll_threshold,
-            self.scroll_amount,
+            self.move_threshold,
             click_smoother,
+            move_smoother,
+            scroll_smoother,
         )
 
     def process(self, model_output: dict[str, torch.Tensor]) -> TrackpadCommand:
@@ -232,38 +269,47 @@ class ControllerModelInterface:
         Process controller model output to TrackpadCommand.
 
         Args:
-            model_output: Dict with "dxdy" (1, 2) and "actions" (1, 3)
+            model_output: Dict with "dxdy" (1, 4) and "actions" (1, 4)
 
         Returns:
             TrackpadCommand with movement and action states
         """
         # Process movement
         dxdy_normalized = model_output["dxdy"].cpu().numpy()[0]
-        dx, dy = self._movement_processor.process(dxdy_normalized)
+        dx, dy, scroll_dx, scroll_dy = self._movement_processor.process(
+            dxdy_normalized
+        )
 
         # Process actions
         actions_logits = model_output["actions"].cpu().numpy()[0]
-        click_state, _, scroll_dy = self._action_processor.process(actions_logits)
+        click_state, move_active, scroll_active = self._action_processor.process(
+            actions_logits
+        )
 
         return TrackpadCommand(
             dx=float(dx),
             dy=float(dy),
             click_state=click_state,
+            scroll_dx=float(scroll_dx),
             scroll_dy=float(scroll_dy),
+            is_move_enabled=move_active,
+            is_scroll_enabled=scroll_active,
         )
 
     def get_raw_values(
         self, model_output: dict[str, torch.Tensor]
-    ) -> tuple[float, float, bool, bool, bool]:
+    ) -> tuple[float, float, bool, bool, bool, bool]:
         """Get raw denormalized values for display purposes."""
         dxdy_normalized = model_output["dxdy"].cpu().numpy()[0]
         dx = dxdy_normalized[0] * self.dxdy_std[0] + self.dxdy_mean[0]
         dy = dxdy_normalized[1] * self.dxdy_std[1] + self.dxdy_mean[1]
 
+        # Action order: [move, scroll, left, right]
         actions_logits = model_output["actions"].cpu().numpy()[0]
         probs = 1.0 / (1.0 + np.exp(-actions_logits))
-        left_click = probs[0] > self.click_threshold
-        right_click = probs[1] > self.click_threshold
-        scroll = probs[2] > self.scroll_threshold
+        move = probs[0] > self.move_threshold
+        scroll = probs[1] > self.scroll_threshold
+        left_click = probs[2] > self.click_threshold
+        right_click = probs[3] > self.click_threshold
 
-        return float(dx), float(dy), bool(left_click), bool(right_click), bool(scroll)
+        return float(dx), float(dy), bool(move), bool(left_click), bool(right_click), bool(scroll)
