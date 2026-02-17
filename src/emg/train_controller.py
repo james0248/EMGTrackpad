@@ -20,6 +20,18 @@ logger = logging.getLogger(__name__)
 ACTION_NAMES = ["move", "scroll", "left", "right"]
 
 
+def total_data_duration_s(dataset) -> float:
+    """Compute total duration in seconds across all loaded sessions."""
+    total = 0.0
+    for session_dataset in dataset.datasets:
+        if len(session_dataset.emg_timestamps) < 2:
+            continue
+        total += float(
+            session_dataset.emg_timestamps[-1] - session_dataset.emg_timestamps[0]
+        )
+    return total
+
+
 def predict_action(logits: torch.Tensor, threshold: float = 0.5) -> torch.Tensor:
     """Predict actions from logits using BCE inference logic.
 
@@ -222,6 +234,10 @@ def train(cfg: DictConfig):
         emg_scale=cfg.preprocessing.emg_scale,
         stride_s=cfg.training.stride_s,
         jitter=cfg.training.get("jitter", False),
+    )
+    duration_s = total_data_duration_s(dataset)
+    logger.info(
+        f"Total data duration: {duration_s:.2f}s ({duration_s / 60:.2f} min, {duration_s / 3600:.2f} h)"
     )
 
     # Log normalization statistics
