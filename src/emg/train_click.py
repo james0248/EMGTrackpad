@@ -10,7 +10,7 @@ import torch.nn as nn
 from hydra.core.hydra_config import HydraConfig
 from hydra.utils import instantiate
 from omegaconf import DictConfig
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, Subset
 
 from emg.datasets.click_dataset import make_click_dataset
 from emg.util.device import get_device
@@ -146,9 +146,12 @@ def train(cfg: DictConfig):
         stride_s=cfg.training.stride_s,
     )
 
-    # Split into train and eval
+    # Split into train and eval (time-based: front=train, back=eval)
     eval_split = cfg.training.eval_split
-    train_dataset, eval_dataset = random_split(dataset, [1 - eval_split, eval_split])
+    n = len(dataset)
+    split = int(n * (1 - eval_split))
+    train_dataset = Subset(dataset, range(split))
+    eval_dataset = Subset(dataset, range(split, n))
     train_loader = DataLoader(
         train_dataset,
         batch_size=cfg.training.batch_size,
