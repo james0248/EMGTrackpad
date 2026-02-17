@@ -1,0 +1,42 @@
+data_dir: data/controller
+
+model:
+  _target_: emg.model.mpf.MPFMLPModel
+  num_channels: 8
+  emg_sample_rate: 500.0
+  hidden_dims: [256, 256, 256]
+  window_length_s: ${training.window_length_s}
+  mpf_window_length: 256
+  mpf_stride: 32
+  n_fft: 64
+  fft_stride: 32
+  frequency_bins:
+    - [0, 32]
+    - [32, 128]
+    - [128, 250]
+  dropout: 0.2
+
+preprocessing:
+  highpass_freq: 20.0
+  emg_scale: 1
+
+training:
+  seed: 42
+  window_length_s: 2.0
+  stride_s: 2.0
+  batch_size: 512
+  num_epochs: 200
+  grad_clip_norm: 1.0
+  eval_interval: 10
+  eval_split: 0.1
+  save_interval: 25
+  device: mps
+  use_class_weights: true
+  action_loss_weight: 1.0
+  dxdy_loss_weight: 1.0
+  jitter: true
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 3e-4
+  weight_decay: 0.01
