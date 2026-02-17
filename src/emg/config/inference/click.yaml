@@ -4,3 +4,10 @@ inference_interval: 0.1
 smoothing:
   confidence_threshold: 0.7
   hold_frames: 2
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+  job:
+    chdir: false

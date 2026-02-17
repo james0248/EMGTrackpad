@@ -21,9 +21,9 @@ preprocessing:
 training:
   seed: 42
   window_length_s: 2.0
-  stride_s: 0.05
+  stride_s: 0.5
   batch_size: 512
-  num_epochs: 200
+  num_epochs: 300
   grad_clip_norm: 1.0
   eval_interval: 10
   eval_split: 0.1

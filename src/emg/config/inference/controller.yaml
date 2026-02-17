@@ -8,3 +8,10 @@ smoothing:
   move_threshold: 0.4
   confidence_threshold: 0.4
   hold_frames: 5
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+  job:
+    chdir: false
