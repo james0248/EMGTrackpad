@@ -42,24 +42,6 @@ class STFTFeatures(nn.Module):
         return spectrum
 
 
-class SinusoidalPositionalEncoding(nn.Module):
-    """Standard sinusoidal positional encoding for time dimension."""
-
-    def __init__(self, d_model: int, max_len: int):
-        super().__init__()
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(
-            torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model)
-        )
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        self.register_buffer("pe", pe)
-
-    def forward(self, seq_len: int) -> torch.Tensor:
-        return self.pe[:seq_len]
-
-
 class CircularChannelEncoding(nn.Module):
     """Circular sinusoidal encoding for EMG channels arranged in a ring.
 
@@ -117,7 +99,6 @@ class STFTTransformerBase(nn.Module):
 
         self.stft_features = STFTFeatures(fft_window=fft_window, fft_stride=fft_stride)
         self.input_projection = nn.Linear(self.stft_features.num_freqs, d_model)
-        self.time_pe = SinusoidalPositionalEncoding(d_model, max_len=1000)
         self.channel_pe = CircularChannelEncoding(
             d_model, num_channels, num_frequencies=num_channels // 2
         )
@@ -138,6 +119,28 @@ class STFTTransformerBase(nn.Module):
     def device(self) -> torch.device:
         return next(self.parameters()).device
 
+    def _build_block_causal_mask(
+        self, num_time_frames: int, device: torch.device
+    ) -> torch.Tensor:
+        """Build block-causal mask over flattened (time, channel) tokens plus suffix CLS.
+
+        Non-CLS tokens at time t can attend to all channels at times <= t.
+        CLS is appended at sequence end and can attend to all non-CLS tokens.
+        """
+        num_signal_tokens = num_time_frames * self.num_channels
+        seq_len = num_signal_tokens + 1  # +1 for suffix CLS token
+
+        time_ids = torch.arange(num_time_frames, device=device).repeat_interleave(
+            self.num_channels
+        )
+        # True means blocked. Block keys from future time blocks.
+        signal_block_mask = time_ids.unsqueeze(0) > time_ids.unsqueeze(1)
+
+        mask = torch.zeros((seq_len, seq_len), dtype=torch.bool, device=device)
+        mask[:num_signal_tokens, :num_signal_tokens] = signal_block_mask
+        mask[:num_signal_tokens, -1] = True  # Non-CLS tokens cannot attend to future CLS
+        return mask
+
     def encode(self, emg: torch.Tensor) -> torch.Tensor:
         """Encode EMG signal to CLS token representation."""
         batch_size = emg.shape[0]
@@ -147,18 +150,18 @@ class STFTTransformerBase(nn.Module):
 
         x = self.input_projection(stft)
 
-        time_pe = self.time_pe(num_time_frames)
         channel_pe = self.channel_pe()
-        x = x + time_pe.unsqueeze(0).unsqueeze(0) + channel_pe.unsqueeze(0).unsqueeze(2)
+        x = x + channel_pe.unsqueeze(0).unsqueeze(2)
 
         x = rearrange(x, "b c t d -> b (t c) d")
+        attention_mask = self._build_block_causal_mask(num_time_frames, x.device)
 
         cls_tokens = self.cls_token.expand(batch_size, -1, -1)
-        x = torch.cat([cls_tokens, x], dim=1)
+        x = torch.cat([x, cls_tokens], dim=1)
 
-        x = self.transformer(x)
+        x = self.transformer(x, mask=attention_mask)
 
-        return x[:, 0]
+        return x[:, -1]
 
 
 class STFTTransformerClickClassifier(STFTTransformerBase):
