@@ -15,6 +15,7 @@ export interface ClickGridCell {
   col: number;
   active: boolean;
   requiredButton: ClickButton | null;
+  holdDurationMs: number | null;
   done: boolean;
 }
 

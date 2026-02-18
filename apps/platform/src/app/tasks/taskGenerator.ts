@@ -49,8 +49,8 @@ export function generateTask(prng: PRNG, lastKinds: string[], enabledTasks: Task
 // Fixed click grid constants
 const CLICK_GRID_ROWS = 5;
 const CLICK_GRID_COLS = 10;
-const CLICK_GRID_LEFT_COUNT = 6;
-const CLICK_GRID_RIGHT_COUNT = 2;
+const CLICK_GRID_LEFT_COUNT = 4;
+const CLICK_GRID_RIGHT_COUNT = 4;
 
 function generateClickGrid(prng: PRNG): ClickGridSpec {
   // Generate cells for rectangular grid (wider than tall)
@@ -63,18 +63,20 @@ function generateClickGrid(prng: PRNG): ClickGridSpec {
         col,
         active: false,
         requiredButton: null,
+        holdDurationMs: null,
         done: false,
       });
     }
   }
 
-  // Randomly select active cells (fixed counts: 6 left, 2 right)
+  // Randomly select active cells (fixed counts: 4 left, 4 right)
   const shuffled = prng.shuffle([...cells]);
   const activeCells: ClickGridCell[] = [];
   for (let i = 0; i < CLICK_GRID_LEFT_COUNT + CLICK_GRID_RIGHT_COUNT; i++) {
     const cell = shuffled[i]!;
     cell.active = true;
     cell.requiredButton = i < CLICK_GRID_LEFT_COUNT ? "left" : "right";
+    cell.holdDurationMs = prng.nextInt(200, 600);
     activeCells.push(cell);
   }
 
