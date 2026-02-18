@@ -1,7 +1,7 @@
 data_dir: data/controller
 
 model:
-  _target_: emg.model.rms_lstm.FrequencyRMSLSTMModel
+  _target_: emg.model.freq_rms.FrequencyRMSLSTMModel
   num_channels: 8
   emg_sample_rate: 500.0
   window_length_s: ${training.window_length_s}
