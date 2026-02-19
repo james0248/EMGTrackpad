@@ -16,6 +16,7 @@ class MultivariatePowerFrequencyFeatures(nn.Module):
         fft_stride: int,
         fs: float = 2000.0,
         frequency_bins: list[tuple[float, float]] | None = None,
+        spec_augment: nn.Module | None = None,
     ) -> None:
         super().__init__()
         if window_length < n_fft:
@@ -35,6 +36,7 @@ class MultivariatePowerFrequencyFeatures(nn.Module):
         self.fft_stride = fft_stride
         self.fs = fs
         self.frequency_bins = frequency_bins
+        self.spec_augment = spec_augment
 
         window = torch.hann_window(self.n_fft, periodic=False)
         self.register_buffer("window", window)
@@ -101,6 +103,8 @@ class MultivariatePowerFrequencyFeatures(nn.Module):
         outputs = (eigvecs * eigvals.unsqueeze(dim=-2)) @ eigvecs.transpose(-1, -2)
 
         outputs = outputs.permute(0, 2, 3, 4, 1)
+        if self.spec_augment is not None:
+            outputs = self.spec_augment(outputs)
         return outputs
 
     @staticmethod
@@ -159,6 +163,7 @@ class MPFMLPModel(nn.Module):
         fft_stride: int,
         frequency_bins: list[tuple[float, float]] | None = None,
         dropout: float = 0.0,
+        spec_augment: nn.Module | None = None,
     ):
         super().__init__()
 
@@ -171,11 +176,13 @@ class MPFMLPModel(nn.Module):
             fft_stride=fft_stride,
             fs=emg_sample_rate,
             frequency_bins=frequency_bins,
+            spec_augment=spec_augment,
         )
 
         num_windows = int(
-            self.mpf_features.compute_time_downsampling(torch.tensor([window_samples]))
-            .item()
+            self.mpf_features.compute_time_downsampling(
+                torch.tensor([window_samples])
+            ).item()
         )
         if num_windows <= 0:
             raise ValueError(
@@ -230,6 +237,7 @@ class MPFLSTMModel(nn.Module):
         lstm_hidden_dim: int,
         lstm_num_layers: int,
         dropout: float = 0.1,
+        spec_augment: nn.Module | None = None,
     ):
         super().__init__()
 
@@ -242,11 +250,13 @@ class MPFLSTMModel(nn.Module):
             fft_stride=fft_stride,
             fs=emg_sample_rate,
             frequency_bins=frequency_bins,
+            spec_augment=spec_augment,
         )
 
         num_windows = int(
-            self.mpf_features.compute_time_downsampling(torch.tensor([window_samples]))
-            .item()
+            self.mpf_features.compute_time_downsampling(
+                torch.tensor([window_samples])
+            ).item()
         )
         if num_windows <= 0:
             raise ValueError(

@@ -14,12 +14,14 @@ class _FrequencyRMSBase(nn.Module):
         fft_window: int,
         fft_stride: int,
         frequency_bins: list[tuple[float, float]],
+        spec_augment: nn.Module | None = None,
     ):
         super().__init__()
         self.sample_rate = sample_rate
         self.fft_window = fft_window
         self.fft_stride = fft_stride
         self.frequency_bins = frequency_bins
+        self.spec_augment = spec_augment
         self.register_buffer("freq_masks", self._build_frequency_masks())
 
         hann_window = torch.hann_window(fft_window, periodic=False)
@@ -55,7 +57,10 @@ class _FrequencyRMSBase(nn.Module):
             )
             / self.window_normalization_factor
         ).abs() ** 2
-        return rearrange(power, "bc f t -> bc () f t")
+        power = rearrange(power, "bc f t -> bc () f t")
+        if self.spec_augment is not None:
+            power = self.spec_augment(power)
+        return power
 
 
 class FrequencyRMSFeatures(_FrequencyRMSBase):
@@ -106,6 +111,7 @@ class FrequencyRMSMLPModel(nn.Module):
         fft_stride: int,
         frequency_bins: list[tuple[float, float]],
         dropout: float = 0.0,
+        spec_augment: nn.Module | None = None,
     ):
         super().__init__()
 
@@ -118,6 +124,7 @@ class FrequencyRMSMLPModel(nn.Module):
             fft_window=fft_window,
             fft_stride=fft_stride,
             frequency_bins=frequency_bins,
+            spec_augment=spec_augment,
         )
 
         input_dim = num_channels * num_time_frames * num_bins
@@ -170,6 +177,7 @@ class FrequencyRMSMLPClickClassifier(nn.Module):
         fft_stride: int,
         frequency_bins: list[tuple[float, float]],
         dropout: float,
+        spec_augment: nn.Module | None = None,
     ):
         super().__init__()
 
@@ -182,6 +190,7 @@ class FrequencyRMSMLPClickClassifier(nn.Module):
             fft_window=fft_window,
             fft_stride=fft_stride,
             frequency_bins=frequency_bins,
+            spec_augment=spec_augment,
         )
 
         input_dim = num_channels * num_time_frames * num_bins
@@ -224,6 +233,7 @@ class FrequencyRMSLSTMModel(nn.Module):
         lstm_hidden_dim: int,
         lstm_num_layers: int,
         dropout: float = 0.1,
+        spec_augment: nn.Module | None = None,
     ):
         super().__init__()
 
@@ -235,6 +245,7 @@ class FrequencyRMSLSTMModel(nn.Module):
             fft_window=fft_window,
             fft_stride=fft_stride,
             frequency_bins=frequency_bins,
+            spec_augment=spec_augment,
         )
 
         self.projection = nn.Linear(input_dim, projection_dim)
