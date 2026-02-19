@@ -1,0 +1,47 @@
+data_dir: data/controller
+
+model:
+  _target_: emg.model.channel_attention.ChannelAttentionMLPController
+  num_channels: 8
+  emg_sample_rate: 500.0
+  window_length_s: ${training.window_length_s}
+  fft_window: 64
+  fft_stride: 32
+  d_model: 64
+  num_heads: 4
+  num_layers: 1
+  dim_feedforward: 64
+  hidden_dims: [256, 256, 256]
+  dropout: 0.1
+
+preprocessing:
+  highpass_freq: 20.0
+  emg_scale: 1
+
+training:
+  seed: 42
+  window_length_s: 2.0
+  stride_s: 0.5
+  batch_size: 512
+  num_epochs: 300
+  grad_clip_norm: 1.0
+  eval_interval: 10
+  eval_split: 0.1
+  save_interval: 25
+  device: mps
+  use_class_weights: true
+  action_loss_weight: 1.0
+  dxdy_loss_weight: 1.0
+  jitter: true
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 3e-4
+  weight_decay: 0.01
+
+scheduler:
+  _target_: emg.util.lr_scheduler.CosineWarmStartLR
+  total_epochs: ${training.num_epochs}
+  warmup_epochs: 30
+  eta_min: 1e-6
+  warmup_start_factor: 0.1
