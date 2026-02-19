@@ -284,6 +284,15 @@ def train(cfg: DictConfig):
 
     # Optimizer
     optimizer = instantiate(cfg.optimizer, params=model.parameters())
+    scheduler = None
+    if cfg.get("scheduler") is not None:
+        scheduler = instantiate(cfg.scheduler, optimizer=optimizer)
+        logger.info(f"Using LR scheduler: {scheduler.__class__.__name__}")
+    else:
+        logger.info("No LR scheduler configured")
+    logger.info(
+        f"Initial learning rate(s): {[group['lr'] for group in optimizer.param_groups]}"
+    )
 
     # Loss functions
     num_actions = len(ACTION_NAMES)
@@ -351,7 +360,8 @@ def train(cfg: DictConfig):
 
         logger.info(
             f"Epoch {epoch + 1:3d}/{cfg.training.num_epochs} | "
-            f"Loss: {avg_loss:.4f} (action: {avg_action_loss:.4f}, dxdy: {avg_dxdy_loss:.4f})"
+            f"Loss: {avg_loss:.4f} (action: {avg_action_loss:.4f}, dxdy: {avg_dxdy_loss:.4f}) | "
+            f"LR: {optimizer.param_groups[0]['lr']:.2e}"
         )
 
         # Evaluation
@@ -388,6 +398,9 @@ def train(cfg: DictConfig):
             )
 
             model.train()
+
+        if scheduler is not None:
+            scheduler.step()
 
         # Save checkpoint with normalization stats
         if (epoch + 1) % cfg.training.save_interval == 0:
