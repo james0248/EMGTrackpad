@@ -312,4 +312,16 @@ class ControllerModelInterface:
         left_click = probs[2] > self.click_threshold
         right_click = probs[3] > self.click_threshold
 
-        return float(dx), float(dy), bool(move), bool(left_click), bool(right_click), bool(scroll)
+        return (
+            float(dx),
+            float(dy),
+            bool(move),
+            bool(left_click),
+            bool(right_click),
+            bool(scroll),
+        )
+
+    def get_action_probs(self, model_output: dict[str, torch.Tensor]) -> np.ndarray:
+        """Get raw action probabilities in [move, scroll, left, right] order."""
+        actions_logits = model_output["actions"].cpu().numpy()[0]
+        return 1.0 / (1.0 + np.exp(-actions_logits))

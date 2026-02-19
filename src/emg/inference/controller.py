@@ -21,6 +21,8 @@ from emg.inference.trackpad import VirtualTrackpad
 from emg.inference.visualizer import InferenceState, TerminalVisualizer
 from emg.util.device import get_device
 
+ACTION_NAMES = ["Move", "Scroll", "Left Click", "Right Click"]
+
 
 class ControllerInference:
     """Loads controller model and runs inference with dxdy denormalization."""
@@ -116,6 +118,7 @@ def main(cfg: DictConfig):
         current_dx, current_dy = 0.0, 0.0
         current_move, current_left_click = False, False
         current_right_click, current_scroll = False, False
+        current_action_probs = np.zeros(4, dtype=np.float64)
 
         with Live(console=console, refresh_per_second=30) as live:
             while True:
@@ -143,6 +146,7 @@ def main(cfg: DictConfig):
                         current_right_click,
                         current_scroll,
                     ) = interface.get_raw_values(output)
+                    current_action_probs = interface.get_action_probs(output)
 
                     # Process through interface and apply to trackpad
                     command = interface.process(output)
@@ -160,6 +164,8 @@ def main(cfg: DictConfig):
                     left_click=current_left_click,
                     right_click=current_right_click,
                     scroll=current_scroll,
+                    action_probs=current_action_probs.tolist(),
+                    action_names=ACTION_NAMES,
                     buffer_ready=buffer.is_ready(),
                     buffer_fill=buffer_fill,
                 )

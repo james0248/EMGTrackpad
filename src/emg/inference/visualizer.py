@@ -17,6 +17,8 @@ class InferenceState:
     # Controller model fields (None if not applicable)
     dx: float | None = None
     dy: float | None = None
+    action_probs: list[float] | None = None  # [move, scroll, left, right]
+    action_names: list[str] | None = None
 
     # Shared action states
     move: bool = False
@@ -65,6 +67,19 @@ class TerminalVisualizer:
             return label, fmt.format(value)
         return label, "[dim]—[/]"
 
+    def _build_probability_bar(self, prob: float, width: int = 30) -> str:
+        """Build a fixed-width probability bar."""
+        clamped_prob = max(0.0, min(1.0, prob))
+        bar_width = int(clamped_prob * width)
+        return "[blue]" + "█" * bar_width + "[/]" + "░" * (width - bar_width)
+
+    def _add_probability_rows(
+        self, table: Table, names: list[str], probs: list[float], indent: str = "  "
+    ) -> None:
+        for name, prob in zip(names, probs, strict=False):
+            bar = self._build_probability_bar(prob)
+            table.add_row(f"{indent}{name}", f"{bar} {prob:.1%}")
+
     def build_display(self, state: InferenceState) -> Panel:
         table = Table(show_header=False, box=None, padding=(0, 1))
         table.add_column("Label", style="bold")
@@ -81,13 +96,17 @@ class TerminalVisualizer:
         # Probability bars (click model)
         table.add_row("", "")
         if state.probs is not None and state.class_names is not None:
-            for i, name in enumerate(state.class_names):
-                prob = state.probs[i]
-                bar_width = int(prob * 30)
-                bar = "[blue]" + "█" * bar_width + "[/]" + "░" * (30 - bar_width)
-                table.add_row(f"  {name}", f"{bar} {prob:.1%}")
+            self._add_probability_rows(table, state.class_names, state.probs)
         else:
             table.add_row("  [dim]N/A[/]", "")
+
+        # Action probabilities (controller model)
+        if state.action_probs is not None and state.action_names is not None:
+            table.add_row("", "")
+            table.add_row("Action Probs", "")
+            self._add_probability_rows(
+                table, state.action_names, state.action_probs, indent="  "
+            )
 
         # Cursor movement section (controller model)
         table.add_row("", "")
