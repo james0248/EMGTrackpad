@@ -47,13 +47,13 @@ export function generateTask(prng: PRNG, lastKinds: string[], enabledTasks: Task
 }
 
 // Fixed click grid constants
-const CLICK_GRID_ROWS = 5;
-const CLICK_GRID_COLS = 10;
+const CLICK_GRID_ROWS = 8;
+const CLICK_GRID_COLS = 8;
 const CLICK_GRID_LEFT_COUNT = 4;
 const CLICK_GRID_RIGHT_COUNT = 4;
 
 function generateClickGrid(prng: PRNG): ClickGridSpec {
-  // Generate cells for rectangular grid (wider than tall)
+  // Generate cells for a square n x n grid
   const cells: ClickGridCell[] = [];
   for (let row = 0; row < CLICK_GRID_ROWS; row++) {
     for (let col = 0; col < CLICK_GRID_COLS; col++) {

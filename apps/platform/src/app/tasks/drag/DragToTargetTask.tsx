@@ -209,7 +209,7 @@ export function DragToTargetTask({ spec, onComplete }: DragToTargetTaskProps) {
   const doneCount = draggables.filter((d) => d.done).length;
 
   return (
-    <div className="flex flex-col items-center gap-6 w-full max-w-4xl">
+    <div className="flex flex-col items-center gap-6 w-full max-w-4xl px-4">
       {/* Instructions */}
       <div className="text-center">
         <h2 className="text-xl font-display font-semibold text-surface-900 mb-2">Drag Task</h2>
@@ -224,7 +224,8 @@ export function DragToTargetTask({ spec, onComplete }: DragToTargetTaskProps) {
       {/* Playground */}
       <div
         ref={containerRef}
-        className="relative w-full h-96 bg-surface-200 rounded-xl overflow-hidden"
+        className="relative w-full aspect-square bg-surface-200 rounded-xl overflow-hidden mx-auto"
+        style={{ maxWidth: "min(90vw, 70vh)" }}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
       >

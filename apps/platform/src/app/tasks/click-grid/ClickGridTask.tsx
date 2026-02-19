@@ -154,7 +154,7 @@ export function ClickGridTask({ spec, onComplete }: ClickGridTaskProps) {
   }, [holdingCellId, resetHold]);
 
   return (
-    <div className="flex flex-col items-center gap-6">
+    <div className="flex flex-col items-center gap-6 w-full max-w-4xl px-4">
       {/* Instructions */}
       <div className="text-center">
         <h2 className="text-xl font-display font-semibold text-surface-900 mb-2">
@@ -175,23 +175,26 @@ export function ClickGridTask({ spec, onComplete }: ClickGridTaskProps) {
       </div>
 
       {/* Grid */}
-      <div
-        className="grid gap-2 p-4 bg-surface-200 rounded-xl"
-        style={{
-          gridTemplateColumns: `repeat(${spec.cols}, 1fr)`,
-        }}
-      >
-        {cells.map((cell) => (
-          <GridCell
-            key={cell.id}
-            cell={cell}
-            isCurrent={cell.id === currentTargetId}
-            isShaking={shakingCell === cell.id}
-            holdProgress={holdingCellId === cell.id ? holdProgress : 0}
-            onPressStart={handlePressStart}
-            onPressEnd={handlePressEnd}
-          />
-        ))}
+      <div className="w-full mx-auto" style={{ maxWidth: "min(90vw, 70vh)" }}>
+        <div
+          className="grid w-full aspect-square gap-2 p-4 bg-surface-200 rounded-xl"
+          style={{
+            gridTemplateColumns: `repeat(${spec.cols}, minmax(0, 1fr))`,
+            gridTemplateRows: `repeat(${spec.rows}, minmax(0, 1fr))`,
+          }}
+        >
+          {cells.map((cell) => (
+            <GridCell
+              key={cell.id}
+              cell={cell}
+              isCurrent={cell.id === currentTargetId}
+              isShaking={shakingCell === cell.id}
+              holdProgress={holdingCellId === cell.id ? holdProgress : 0}
+              onPressStart={handlePressStart}
+              onPressEnd={handlePressEnd}
+            />
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -243,9 +246,9 @@ function GridCell({
       role="button"
       tabIndex={0}
       className={`
-        relative w-16 h-16 flex items-center justify-center overflow-hidden
+        relative w-full h-full min-w-0 min-h-0 flex items-center justify-center overflow-hidden
         rounded-lg border-2 transition-all duration-150
-        select-none font-mono text-lg font-bold
+        select-none font-mono text-sm sm:text-base md:text-lg font-bold
         ${isHolding ? "scale-105" : "scale-100"}
         ${bgClass} ${cursor}
         ${isShaking ? "shake" : ""}
