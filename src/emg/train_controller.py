@@ -10,6 +10,7 @@ import torch.nn as nn
 from hydra.core.hydra_config import HydraConfig
 from hydra.utils import instantiate
 from omegaconf import DictConfig
+from scipy.stats import gaussian_kde
 from torch.utils.data import DataLoader, Subset
 
 from emg.datasets.controller_dataset import make_controller_dataset
@@ -19,6 +20,8 @@ from emg.util.device import get_device
 logger = logging.getLogger(__name__)
 
 ACTION_NAMES = ["move", "scroll", "left", "right"]
+MOVEMENT_CLASS_NAMES = ["nothing", "move", "scroll"]
+CLICK_CLASS_NAMES = ["nothing", "left", "right"]
 
 
 def total_data_duration_s(dataset) -> float:
@@ -33,28 +36,42 @@ def total_data_duration_s(dataset) -> float:
     return total
 
 
-def predict_action(logits: torch.Tensor, threshold: float = 0.5) -> torch.Tensor:
-    """Predict actions from logits using BCE inference logic.
+def predict_group_action(
+    group_logits: torch.Tensor,
+    thresholds: tuple[float, float],
+) -> torch.Tensor:
+    """Predict group action with thresholding + max-logit winner.
 
-    Args:
-        logits: Raw logits of shape (batch, num_actions)
-        threshold: Probability threshold for selecting an action
-
-    Returns:
-        Predicted action index. If no action exceeds threshold, returns -1 (nothing).
-        If multiple actions exceed threshold, returns the one with highest probability.
+    Group output labels are:
+        0 = nothing, 1 = first action, 2 = second action
     """
-    probs = torch.sigmoid(logits)
-    above_threshold = probs > threshold
-
-    # Default to -1 (nothing) if no action exceeds threshold
-    preds = torch.full((logits.shape[0],), -1, dtype=torch.long, device=logits.device)
-
-    # For samples with at least one action above threshold, pick the highest prob
+    probs = torch.sigmoid(group_logits)
+    threshold_tensor = torch.tensor(
+        thresholds, dtype=probs.dtype, device=probs.device
+    ).view(1, -1)
+    above_threshold = probs > threshold_tensor
     any_above = above_threshold.any(dim=-1)
-    preds[any_above] = probs[any_above].argmax(dim=-1)
 
+    masked_logits = group_logits.masked_fill(~above_threshold, float("-inf"))
+    winners = masked_logits.argmax(dim=-1) + 1
+
+    preds = torch.zeros(group_logits.shape[0], dtype=torch.long, device=group_logits.device)
+    preds[any_above] = winners[any_above]
     return preds
+
+
+def predict_grouped_actions(
+    logits: torch.Tensor,
+    move_threshold: float = 0.5,
+    scroll_threshold: float = 0.5,
+    click_threshold: float = 0.5,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Predict movement/click group classes from action logits."""
+    movement_preds = predict_group_action(
+        logits[:, :2], (move_threshold, scroll_threshold)
+    )
+    click_preds = predict_group_action(logits[:, 2:], (click_threshold, click_threshold))
+    return movement_preds, click_preds
 
 
 def compute_pos_weights(dataloader: DataLoader, num_actions: int = 4) -> torch.Tensor:
@@ -70,30 +87,244 @@ def compute_pos_weights(dataloader: DataLoader, num_actions: int = 4) -> torch.T
     return neg_counts / (pos_counts + 1e-8)
 
 
-def save_confusion_matrix(
-    cm: torch.Tensor, class_names: list[str], save_path: Path
+def group_targets(
+    action_targets: torch.Tensor, start: int, end: int
+) -> torch.Tensor:
+    """Convert two binary targets to grouped class labels.
+
+    Output labels are:
+        0 = nothing, 1 = first action, 2 = second action
+    """
+    group = action_targets[:, start:end]
+    return torch.where(
+        group.any(dim=-1),
+        group.argmax(dim=-1) + 1,
+        torch.zeros(group.shape[0], dtype=torch.long, device=group.device),
+    )
+
+
+def compute_group_metrics(
+    preds: torch.Tensor,
+    targets: torch.Tensor,
+    class_names: list[str],
+) -> dict[str, float | torch.Tensor | list[str]]:
+    """Compute accuracy/F1/confusion for one grouped classifier."""
+    num_classes = len(class_names)
+    metrics: dict[str, float | torch.Tensor | list[str]] = {
+        "accuracy": (preds == targets).float().mean().item(),
+    }
+
+    preds_onehot = torch.nn.functional.one_hot(preds, num_classes).bool()
+    targets_onehot = torch.nn.functional.one_hot(targets, num_classes).bool()
+
+    tp = (preds_onehot & targets_onehot).sum(dim=0).float()
+    fp = (preds_onehot & ~targets_onehot).sum(dim=0).float()
+    fn = (~preds_onehot & targets_onehot).sum(dim=0).float()
+
+    precision = tp / (tp + fp + 1e-8)
+    recall = tp / (tp + fn + 1e-8)
+    f1 = 2 * precision * recall / (precision + recall + 1e-8)
+    metrics["f1_macro"] = f1.mean().item()
+
+    for c, name in enumerate(class_names):
+        metrics[f"precision_{name}"] = precision[c].item()
+        metrics[f"recall_{name}"] = recall[c].item()
+        metrics[f"f1_{name}"] = f1[c].item()
+
+    confusion = torch.zeros(
+        num_classes, num_classes, dtype=torch.long, device=preds.device
+    )
+    indices = targets * num_classes + preds
+    confusion.view(-1).scatter_add_(
+        0, indices, torch.ones_like(indices, dtype=torch.long)
+    )
+    metrics["confusion_matrix"] = confusion
+    metrics["class_names"] = class_names
+    return metrics
+
+
+def save_grouped_confusion_matrices(
+    movement_cm: torch.Tensor,
+    movement_class_names: list[str],
+    click_cm: torch.Tensor,
+    click_class_names: list[str],
+    save_path: Path,
 ) -> None:
-    """Save confusion matrix as percentage heatmap image."""
-    cm_np = cm.cpu().numpy()
-    row_sums = cm_np.sum(axis=1, keepdims=True)
-    cm_pct = np.divide(cm_np, row_sums, where=row_sums != 0) * 100
+    """Save movement/click confusion matrices in a single figure."""
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
-    fig, ax = plt.subplots(figsize=(6, 5))
-    im = ax.imshow(cm_pct, cmap="Blues")
+    matrices = [
+        (movement_cm, movement_class_names, "Movement Group Confusion Matrix"),
+        (click_cm, click_class_names, "Click Group Confusion Matrix"),
+    ]
+    for ax, (cm, class_names, title) in zip(axes, matrices, strict=True):
+        cm_np = cm.cpu().numpy()
+        row_sums = cm_np.sum(axis=1, keepdims=True)
+        cm_pct = np.divide(cm_np, row_sums, where=row_sums != 0) * 100
 
-    ax.set_xticks(range(len(class_names)))
-    ax.set_yticks(range(len(class_names)))
-    ax.set_xticklabels(class_names)
-    ax.set_yticklabels(class_names)
-    ax.set_xlabel("Predicted")
-    ax.set_ylabel("Actual")
+        im = ax.imshow(cm_pct, cmap="Blues")
+        ax.set_title(title)
+        ax.set_xticks(range(len(class_names)))
+        ax.set_yticks(range(len(class_names)))
+        ax.set_xticklabels(class_names)
+        ax.set_yticklabels(class_names)
+        ax.set_xlabel("Predicted")
+        ax.set_ylabel("Actual")
 
-    for i in range(len(class_names)):
-        for j in range(len(class_names)):
-            color = "white" if cm_pct[i, j] > 50 else "black"
-            ax.text(j, i, f"{cm_pct[i, j]:.1f}%", ha="center", va="center", color=color)
+        for i in range(len(class_names)):
+            for j in range(len(class_names)):
+                color = "white" if cm_pct[i, j] > 50 else "black"
+                ax.text(j, i, f"{cm_pct[i, j]:.1f}%", ha="center", va="center", color=color)
 
-    plt.colorbar(im, ax=ax, label="Percentage")
+        plt.colorbar(im, ax=ax, label="Percentage")
+
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+
+
+def plot_density(
+    ax,
+    values: np.ndarray,
+    label: str,
+    color: str,
+    x_range: tuple[float, float] | None = None,
+) -> bool:
+    """Plot KDE if stable, otherwise fallback to a density histogram."""
+    clean = np.asarray(values, dtype=np.float64)
+    clean = clean[np.isfinite(clean)]
+    if clean.size == 0:
+        return False
+
+    if x_range is not None:
+        x_min, x_max = x_range
+    else:
+        x_min = float(clean.min())
+        x_max = float(clean.max())
+        if np.isclose(x_min, x_max):
+            x_min -= 1.0
+            x_max += 1.0
+        else:
+            pad = 0.05 * (x_max - x_min)
+            x_min -= pad
+            x_max += pad
+
+    if clean.size >= 2 and np.std(clean) > 1e-8:
+        try:
+            kde = gaussian_kde(clean)
+            x = np.linspace(x_min, x_max, 200)
+            y = kde(x)
+            ax.plot(x, y, color=color, linewidth=2, label=label)
+            return True
+        except (np.linalg.LinAlgError, ValueError):
+            pass
+
+    bins = np.linspace(x_min, x_max, 30) if x_range is not None else 30
+    ax.hist(clean, bins=bins, density=True, alpha=0.35, color=color, label=label)
+    return True
+
+
+def save_action_probability_density_plot(
+    action_probs: np.ndarray,
+    action_targets: np.ndarray,
+    action_names: list[str],
+    threshold: float,
+    save_path: Path,
+) -> None:
+    """Save per-action probability density for negative vs positive labels."""
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8), sharex=True, sharey=True)
+    axes = np.asarray(axes).flatten()
+
+    for i, action_name in enumerate(action_names):
+        ax = axes[i]
+        probs = action_probs[:, i]
+        targets = action_targets[:, i] > 0.5
+
+        has_data = False
+        has_data |= plot_density(
+            ax,
+            probs[~targets],
+            label="negative label",
+            color="#1f77b4",
+            x_range=(0.0, 1.0),
+        )
+        has_data |= plot_density(
+            ax,
+            probs[targets],
+            label="positive label",
+            color="#ff7f0e",
+            x_range=(0.0, 1.0),
+        )
+
+        ax.axvline(
+            threshold,
+            color="black",
+            linestyle="--",
+            linewidth=1,
+            label=f"threshold={threshold:.1f}",
+        )
+        ax.set_xlim(0.0, 1.0)
+        ax.set_title(action_name)
+        ax.set_xlabel("Predicted probability")
+        ax.set_ylabel("Density")
+        if not has_data:
+            ax.text(0.5, 0.5, "No samples", ha="center", va="center", transform=ax.transAxes)
+        handles, _ = ax.get_legend_handles_labels()
+        if handles:
+            ax.legend(fontsize=8)
+
+    for i in range(len(action_names), len(axes)):
+        axes[i].axis("off")
+
+    fig.suptitle("Action probability density by label", fontsize=14)
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+
+
+def save_zero_nonzero_dxdy_plot(
+    actual: np.ndarray,
+    predicted: np.ndarray,
+    group_name: str,
+    component_names: tuple[str, str],
+    save_path: Path,
+) -> None:
+    """Save two-subplot dxdy distributions split by zero vs non-zero actual movement."""
+    zero_mask = np.isclose(actual[:, 0], 0.0, atol=1e-6) & np.isclose(
+        actual[:, 1], 0.0, atol=1e-6
+    )
+    split_defs = [
+        ("Not moving (dx=0 and dy=0)", zero_mask),
+        ("Moving (dx!=0 or dy!=0)", ~zero_mask),
+    ]
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5), sharey=True)
+    for ax, (title, mask) in zip(axes, split_defs, strict=False):
+        has_data = False
+        has_data |= plot_density(
+            ax,
+            actual[mask].reshape(-1),
+            label="actual",
+            color="#1f77b4",
+        )
+        has_data |= plot_density(
+            ax,
+            predicted[mask].reshape(-1),
+            label="predicted",
+            color="#ff7f0e",
+        )
+
+        ax.axvline(0.0, color="black", linestyle="--", linewidth=1, alpha=0.6)
+        ax.set_title(f"{title} (n={int(mask.sum())})")
+        ax.set_xlabel(f"{component_names[0]}/{component_names[1]} value")
+        ax.set_ylabel("Density")
+        if not has_data:
+            ax.text(0.5, 0.5, "No samples", ha="center", va="center", transform=ax.transAxes)
+        handles, _ = ax.get_legend_handles_labels()
+        if handles:
+            ax.legend()
+
+    fig.suptitle(f"{group_name} dxdy distribution: actual vs predicted", fontsize=14)
     plt.tight_layout()
     plt.savefig(save_path)
     plt.close()
@@ -105,14 +336,21 @@ def evaluate(
     dataloader: DataLoader,
     device: torch.device,
     action_loss_fn: nn.Module,
-) -> dict[str, float]:
+    dxdy_mean: torch.Tensor,
+    dxdy_std: torch.Tensor,
+) -> dict[str, object]:
     """Evaluate model on validation set."""
     model.eval()
     dxdy_loss_fn = nn.MSELoss()
-    num_actions = len(ACTION_NAMES)
 
-    all_preds = []
-    all_targets = []
+    all_movement_preds = []
+    all_movement_targets = []
+    all_click_preds = []
+    all_click_targets = []
+    all_action_probs = []
+    all_action_targets = []
+    all_dxdy_pred_denorm = []
+    all_dxdy_targets_denorm = []
     total_action_loss = 0.0
     total_dxdy_loss = 0.0
 
@@ -128,62 +366,46 @@ def evaluate(
         total_action_loss += action_loss_fn(action_logits, action_targets).item()
         total_dxdy_loss += dxdy_loss_fn(dxdy_pred, dxdy_targets).item()
 
-        # Predict using threshold logic
-        preds = predict_action(action_logits)
-        # Convert target actions to class index (-1 for nothing)
-        target_idx = torch.where(
-            action_targets.any(dim=-1),
-            action_targets.argmax(dim=-1),
-            torch.tensor(-1, device=device),
-        )
-        all_preds.append(preds)
-        all_targets.append(target_idx)
+        action_probs = torch.sigmoid(action_logits)
+        dxdy_pred_denorm = dxdy_pred * dxdy_std + dxdy_mean
+        dxdy_targets_denorm = dxdy_targets * dxdy_std + dxdy_mean
 
-    preds = torch.cat(all_preds)
-    targets = torch.cat(all_targets)
+        movement_preds, click_preds = predict_grouped_actions(action_logits)
+        movement_targets = group_targets(action_targets, start=0, end=2)
+        click_targets = group_targets(action_targets, start=2, end=4)
+        all_movement_preds.append(movement_preds)
+        all_movement_targets.append(movement_targets)
+        all_click_preds.append(click_preds)
+        all_click_targets.append(click_targets)
+        all_action_probs.append(action_probs.detach().cpu())
+        all_action_targets.append(action_targets.detach().cpu())
+        all_dxdy_pred_denorm.append(dxdy_pred_denorm.detach().cpu())
+        all_dxdy_targets_denorm.append(dxdy_targets_denorm.detach().cpu())
 
-    # Include "nothing" as class index -1 -> shift to 0 for metrics
-    # Classes: 0=nothing, 1=left, 2=right, 3=scroll
-    preds_shifted = preds + 1
-    targets_shifted = targets + 1
-    num_classes = num_actions + 1
-    class_names = ["nothing"] + ACTION_NAMES
+    movement_preds = torch.cat(all_movement_preds)
+    movement_targets = torch.cat(all_movement_targets)
+    click_preds = torch.cat(all_click_preds)
+    click_targets = torch.cat(all_click_targets)
 
-    metrics: dict[str, float] = {
+    metrics: dict[str, object] = {
         "action_loss": total_action_loss / len(dataloader),
         "dxdy_loss": total_dxdy_loss / len(dataloader),
-        "accuracy": (preds == targets).float().mean().item(),
     }
 
-    # Compute per-class metrics using one-hot encoding
-    preds_onehot = torch.nn.functional.one_hot(preds_shifted, num_classes).bool()
-    targets_onehot = torch.nn.functional.one_hot(targets_shifted, num_classes).bool()
-
-    tp = (preds_onehot & targets_onehot).sum(dim=0).float()
-    fp = (preds_onehot & ~targets_onehot).sum(dim=0).float()
-    fn = (~preds_onehot & targets_onehot).sum(dim=0).float()
-
-    precision = tp / (tp + fp + 1e-8)
-    recall = tp / (tp + fn + 1e-8)
-    f1 = 2 * precision * recall / (precision + recall + 1e-8)
-
-    metrics["f1_macro"] = f1.mean().item()
-
-    for c, name in enumerate(class_names):
-        metrics[f"precision_{name}"] = precision[c].item()
-        metrics[f"recall_{name}"] = recall[c].item()
-        metrics[f"f1_{name}"] = f1[c].item()
-
-    # Compute confusion matrix (vectorized)
-    confusion = torch.zeros(
-        num_classes, num_classes, dtype=torch.long, device=preds.device
+    movement_metrics = compute_group_metrics(
+        movement_preds, movement_targets, MOVEMENT_CLASS_NAMES
     )
-    indices = targets_shifted * num_classes + preds_shifted
-    confusion.view(-1).scatter_add_(
-        0, indices, torch.ones_like(indices, dtype=torch.long)
-    )
-    metrics["confusion_matrix"] = confusion
-    metrics["class_names"] = class_names
+    for key, value in movement_metrics.items():
+        metrics[f"movement_{key}"] = value
+
+    click_metrics = compute_group_metrics(click_preds, click_targets, CLICK_CLASS_NAMES)
+    for key, value in click_metrics.items():
+        metrics[f"click_{key}"] = value
+
+    metrics["action_probs"] = torch.cat(all_action_probs, dim=0).numpy()
+    metrics["action_targets"] = torch.cat(all_action_targets, dim=0).numpy()
+    metrics["dxdy_pred_denorm"] = torch.cat(all_dxdy_pred_denorm, dim=0).numpy()
+    metrics["dxdy_targets_denorm"] = torch.cat(all_dxdy_targets_denorm, dim=0).numpy()
 
     return metrics
 
@@ -311,6 +533,8 @@ def train(cfg: DictConfig):
     # Loss weights
     action_weight = cfg.training.get("action_loss_weight", 1.0)
     dxdy_weight = cfg.training.get("dxdy_loss_weight", 1.0)
+    dxdy_mean = torch.tensor(dataset.dxdy_mean, dtype=torch.float32, device=device)
+    dxdy_std = torch.tensor(dataset.dxdy_std, dtype=torch.float32, device=device)
 
     # Loss histories for plotting
     train_losses = {"action": [], "dxdy": [], "all": []}
@@ -366,23 +590,32 @@ def train(cfg: DictConfig):
 
         # Evaluation
         if (epoch + 1) % cfg.training.eval_interval == 0:
-            metrics = evaluate(model, eval_loader, device, action_loss_fn)
+            metrics = evaluate(
+                model, eval_loader, device, action_loss_fn, dxdy_mean, dxdy_std
+            )
             logger.info(
                 f"[Eval] Action Loss: {metrics['action_loss']:.4f} | "
-                f"dxdy Loss: {metrics['dxdy_loss']:.4f} | "
-                f"Acc: {metrics['accuracy']:.4f} | "
-                f"F1 (macro): {metrics['f1_macro']:.4f}"
+                f"dxdy Loss: {metrics['dxdy_loss']:.4f}"
             )
             logger.info(
-                f"       F1 nothing: {metrics['f1_nothing']:.4f} | "
-                f"F1 move: {metrics['f1_move']:.4f} | "
-                f"F1 scroll: {metrics['f1_scroll']:.4f} | "
-                f"F1 left: {metrics['f1_left']:.4f} | "
-                f"F1 right: {metrics['f1_right']:.4f}"
+                f"       Movement Acc: {metrics['movement_accuracy']:.4f} | "
+                f"F1 (macro): {metrics['movement_f1_macro']:.4f} | "
+                f"F1 nothing: {metrics['movement_f1_nothing']:.4f} | "
+                f"F1 move: {metrics['movement_f1_move']:.4f} | "
+                f"F1 scroll: {metrics['movement_f1_scroll']:.4f}"
             )
-            save_confusion_matrix(
-                metrics["confusion_matrix"],
-                metrics["class_names"],
+            logger.info(
+                f"       Click Acc: {metrics['click_accuracy']:.4f} | "
+                f"F1 (macro): {metrics['click_f1_macro']:.4f} | "
+                f"F1 nothing: {metrics['click_f1_nothing']:.4f} | "
+                f"F1 left: {metrics['click_f1_left']:.4f} | "
+                f"F1 right: {metrics['click_f1_right']:.4f}"
+            )
+            save_grouped_confusion_matrices(
+                metrics["movement_confusion_matrix"],
+                metrics["movement_class_names"],
+                metrics["click_confusion_matrix"],
+                metrics["click_class_names"],
                 plots_dir / f"confusion_epoch_{epoch + 1:04d}.png",
             )
 
@@ -395,6 +628,27 @@ def train(cfg: DictConfig):
             save_loss_plots(
                 train_losses, val_losses, val_epochs,
                 plots_dir / "loss_curves.png",
+            )
+            save_action_probability_density_plot(
+                metrics["action_probs"],
+                metrics["action_targets"],
+                ACTION_NAMES,
+                threshold=0.5,
+                save_path=plots_dir / f"action_density_epoch_{epoch + 1:04d}.png",
+            )
+            save_zero_nonzero_dxdy_plot(
+                actual=metrics["dxdy_targets_denorm"][:, :2],
+                predicted=metrics["dxdy_pred_denorm"][:, :2],
+                group_name="Move",
+                component_names=("dx", "dy"),
+                save_path=plots_dir / f"move_dxdy_epoch_{epoch + 1:04d}.png",
+            )
+            save_zero_nonzero_dxdy_plot(
+                actual=metrics["dxdy_targets_denorm"][:, 2:],
+                predicted=metrics["dxdy_pred_denorm"][:, 2:],
+                group_name="Scroll",
+                component_names=("scroll_dx", "scroll_dy"),
+                save_path=plots_dir / f"scroll_dxdy_epoch_{epoch + 1:04d}.png",
             )
 
             model.train()
