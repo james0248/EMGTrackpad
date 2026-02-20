@@ -123,7 +123,9 @@ class ActionProcessor:
     """
     Controller action thresholding with optional smoothing.
 
-    Handles sigmoid + threshold for left_click, right_click, scroll actions.
+    Handles grouped sigmoid + threshold winner logic:
+    - Movement group: move vs scroll
+    - Click group: left vs right
     """
 
     def __init__(
@@ -132,63 +134,100 @@ class ActionProcessor:
         scroll_threshold: float = 0.5,
         move_threshold: float = 0.5,
         click_smoother: ActionSmoother | None = None,
-        move_smoother: ActionSmoother | None = None,
-        scroll_smoother: ActionSmoother | None = None,
+        movement_smoother: ActionSmoother | None = None,
     ):
         self.click_threshold = click_threshold
         self.scroll_threshold = scroll_threshold
         self.move_threshold = move_threshold
         self.click_smoother = click_smoother
-        self.move_smoother = move_smoother
-        self.scroll_smoother = scroll_smoother
+        self.movement_smoother = movement_smoother
+
+    @staticmethod
+    def _select_group_winner(
+        logits: np.ndarray,
+        probs: np.ndarray,
+        first_idx: int,
+        second_idx: int,
+        first_threshold: float,
+        second_threshold: float,
+    ) -> tuple[int, float]:
+        first_prob = float(probs[first_idx])
+        second_prob = float(probs[second_idx])
+
+        candidates: list[tuple[float, int, float]] = []
+        if first_prob > first_threshold:
+            candidates.append((float(logits[first_idx]), 1, first_prob))
+        if second_prob > second_threshold:
+            candidates.append((float(logits[second_idx]), 2, second_prob))
+
+        if not candidates:
+            return 0, 1.0 - max(first_prob, second_prob)
+
+        _, state, confidence = max(candidates, key=lambda x: x[0])
+        return state, confidence
+
+    def predict_group_states(self, actions_logits: np.ndarray) -> tuple[int, int]:
+        """Return grouped winner states without smoothing.
+
+        Returns:
+            Tuple of (movement_state, click_state):
+            - movement_state: 0=none, 1=move, 2=scroll
+            - click_state: 0=none, 1=left, 2=right
+        """
+        probs = 1.0 / (1.0 + np.exp(-actions_logits))
+        movement_state, _ = self._select_group_winner(
+            actions_logits,
+            probs,
+            first_idx=0,
+            second_idx=1,
+            first_threshold=self.move_threshold,
+            second_threshold=self.scroll_threshold,
+        )
+        click_state, _ = self._select_group_winner(
+            actions_logits,
+            probs,
+            first_idx=2,
+            second_idx=3,
+            first_threshold=self.click_threshold,
+            second_threshold=self.click_threshold,
+        )
+        return movement_state, click_state
 
     def process(self, actions_logits: np.ndarray) -> tuple[int, bool, bool]:
         # Action order: [move, scroll, left, right]
-        probs = torch.sigmoid(torch.tensor(actions_logits))
-
-        move_prob = float(probs[0])
-        scroll_prob = float(probs[1])
-        left_prob = float(probs[2])
-        right_prob = float(probs[3])
-
-        # Pick argmax between left and right
-        if left_prob >= right_prob:
-            argmax_state = 1  # ClickState.LEFT
-            argmax_prob = left_prob
-        else:
-            argmax_state = 2  # ClickState.RIGHT
-            argmax_prob = right_prob
-
-        # Apply threshold gate
-        if argmax_prob > self.click_threshold:
-            predicted_state = argmax_state
-            click_confidence = argmax_prob
-        else:
-            predicted_state = 0  # ClickState.NONE
-            click_confidence = 1.0 - argmax_prob
+        probs = 1.0 / (1.0 + np.exp(-actions_logits))
+        movement_predicted, movement_confidence = self._select_group_winner(
+            actions_logits,
+            probs,
+            first_idx=0,
+            second_idx=1,
+            first_threshold=self.move_threshold,
+            second_threshold=self.scroll_threshold,
+        )
+        click_predicted, click_confidence = self._select_group_winner(
+            actions_logits,
+            probs,
+            first_idx=2,
+            second_idx=3,
+            first_threshold=self.click_threshold,
+            second_threshold=self.click_threshold,
+        )
 
         # Apply smoothing if available
         if self.click_smoother is not None:
-            click_state = self.click_smoother.update(predicted_state, click_confidence)
+            click_state = self.click_smoother.update(click_predicted, click_confidence)
         else:
-            click_state = predicted_state
+            click_state = click_predicted
 
-        # Move: binary state 0/1
-        move_predicted = 1 if move_prob > self.move_threshold else 0
-        move_confidence = move_prob if move_predicted == 1 else 1.0 - move_prob
-        if self.move_smoother is not None:
-            move_active = self.move_smoother.update(move_predicted, move_confidence) == 1
+        if self.movement_smoother is not None:
+            movement_state = self.movement_smoother.update(
+                movement_predicted, movement_confidence
+            )
         else:
-            move_active = move_predicted == 1
+            movement_state = movement_predicted
 
-        # Scroll: binary state 0/1
-        scroll_predicted = 1 if scroll_prob > self.scroll_threshold else 0
-        scroll_confidence = scroll_prob if scroll_predicted == 1 else 1.0 - scroll_prob
-        if self.scroll_smoother is not None:
-            scroll_active = self.scroll_smoother.update(scroll_predicted, scroll_confidence) == 1
-        else:
-            scroll_active = scroll_predicted == 1
-
+        move_active = movement_state == 1
+        scroll_active = movement_state == 2
         return click_state, move_active, scroll_active
 
 
@@ -246,10 +285,7 @@ class ControllerModelInterface:
         click_smoother = ActionSmoother(
             self.confidence_threshold, self.hold_frames
         )
-        move_smoother = ActionSmoother(
-            self.confidence_threshold, self.hold_frames
-        )
-        scroll_smoother = ActionSmoother(
+        movement_smoother = ActionSmoother(
             self.confidence_threshold, self.hold_frames
         )
         self._movement_processor = MovementProcessor(
@@ -260,8 +296,7 @@ class ControllerModelInterface:
             self.scroll_threshold,
             self.move_threshold,
             click_smoother,
-            move_smoother,
-            scroll_smoother,
+            movement_smoother,
         )
 
     def process(self, model_output: dict[str, torch.Tensor]) -> TrackpadCommand:
@@ -306,11 +341,13 @@ class ControllerModelInterface:
 
         # Action order: [move, scroll, left, right]
         actions_logits = model_output["actions"].cpu().numpy()[0]
-        probs = 1.0 / (1.0 + np.exp(-actions_logits))
-        move = probs[0] > self.move_threshold
-        scroll = probs[1] > self.scroll_threshold
-        left_click = probs[2] > self.click_threshold
-        right_click = probs[3] > self.click_threshold
+        movement_state, click_state = self._action_processor.predict_group_states(
+            actions_logits
+        )
+        move = movement_state == 1
+        scroll = movement_state == 2
+        left_click = click_state == 1
+        right_click = click_state == 2
 
         return (
             float(dx),

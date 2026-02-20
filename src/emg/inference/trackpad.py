@@ -46,8 +46,10 @@ class VirtualTrackpad:
             )
             Quartz.CGEventPost(Quartz.kCGHIDEventTap, mouse_event)
 
-        is_left_click = click_state == ClickState.LEFT
-        is_right_click = click_state == ClickState.RIGHT
+        # While scrolling, suppress click event emission only at the output layer.
+        effective_click_state = ClickState.NONE if is_scroll_enabled else click_state
+        is_left_click = effective_click_state == ClickState.LEFT
+        is_right_click = effective_click_state == ClickState.RIGHT
 
         # Process click transitions independently from move gating.
         if is_left_click:
