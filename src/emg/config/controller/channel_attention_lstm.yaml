@@ -16,6 +16,13 @@ model:
   lstm_num_layers: 1
   dropout: 0.1
 
+  spec_augment:
+    _target_: emg.model.specaug.SpectrogramSpecMaskAug
+    dims: TF
+    max_num_masks: [2, 2]
+    max_mask_lengths: [5, 20]
+    mask_value: 0.0
+
 preprocessing:
   highpass_freq: 20.0
   emg_scale: 1
@@ -25,7 +32,7 @@ training:
   window_length_s: 2.0
   stride_s: 0.5
   batch_size: 512
-  num_epochs: 300
+  num_epochs: 500
   grad_clip_norm: 1.0
   eval_interval: 10
   eval_split: 0.1

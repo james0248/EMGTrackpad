@@ -44,9 +44,7 @@ class STFTFeatures(nn.Module):
         spectrum = torch.log1p(spectrum)
         if self.spec_augment is not None:
             spectrum = self.spec_augment(spectrum.unsqueeze(1)).squeeze(1)
-        return rearrange(
-            spectrum, "(b c) f t -> b c t f", b=batch_size, c=num_channels
-        )
+        return rearrange(spectrum, "(b c) f t -> b c t f", b=batch_size, c=num_channels)
 
 
 class CircularChannelEncoding(nn.Module):
@@ -216,11 +214,6 @@ class ChannelAttentionFeatures(nn.Module):
 
         stft = self.stft_features(emg)  # (b, c, t, f)
         num_time_frames = stft.shape[2]
-        if num_time_frames != self.num_time_frames:
-            raise ValueError(
-                "Input length does not match configured window length. "
-                f"Expected {self.num_time_frames} STFT frames, got {num_time_frames}."
-            )
 
         x = self.input_projection(stft)  # (b, c, t, d)
         x = x + self.channel_pe().unsqueeze(0).unsqueeze(2)
