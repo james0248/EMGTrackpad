@@ -3,11 +3,11 @@ device: mps
 inference_interval: 0.02
 sensitivity: 1.0
 smoothing:
-  click_threshold: 0.4
-  scroll_threshold: 0.4
-  move_threshold: 0.4
-  confidence_threshold: 0.4
-  hold_frames: 5
+  click_threshold: 0.5
+  scroll_threshold: 0.5
+  move_threshold: 0.5
+  confidence_threshold: 0.5
+  hold_frames: 3
 
 hydra:
   run:

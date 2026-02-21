@@ -9,7 +9,7 @@ model:
   fft_stride: 32
   d_model: 64
   num_heads: 4
-  num_layers: 1
+  num_layers: 2
   dim_feedforward: 64
   projection_dim: 64
   lstm_hidden_dim: 64
@@ -41,6 +41,7 @@ training:
   use_class_weights: true
   action_loss_weight: 1.0
   dxdy_loss_weight: 1.0
+  mask_zero_dxdy_groups: false
   jitter: true
 
 optimizer:

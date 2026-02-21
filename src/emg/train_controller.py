@@ -330,6 +330,48 @@ def save_zero_nonzero_dxdy_plot(
     plt.close()
 
 
+def compute_dxdy_loss(
+    dxdy_pred: torch.Tensor,
+    dxdy_targets: torch.Tensor,
+    dxdy_mean: torch.Tensor,
+    dxdy_std: torch.Tensor,
+    mask_zero_dxdy_groups: bool,
+) -> tuple[torch.Tensor, int]:
+    """Compute dxdy loss and its effective element count.
+
+    When masking is enabled, each movement pair is masked independently:
+      - cursor pair: (dx, dy)
+      - scroll pair: (scroll_dx, scroll_dy)
+    A pair contributes only when at least one of its denormalized targets is non-zero.
+    """
+    if not mask_zero_dxdy_groups:
+        return torch.mean((dxdy_pred - dxdy_targets) ** 2), int(dxdy_targets.numel())
+
+    sq_err = (dxdy_pred - dxdy_targets) ** 2
+    targets_denorm = dxdy_targets * dxdy_std + dxdy_mean
+
+    cursor_active = (targets_denorm[:, 0] != 0.0) | (targets_denorm[:, 1] != 0.0)
+    scroll_active = (targets_denorm[:, 2] != 0.0) | (targets_denorm[:, 3] != 0.0)
+
+    loss_sum = dxdy_pred.sum() * 0.0
+    active_count = 0
+
+    cursor_count = int(cursor_active.sum().item())
+    if cursor_count > 0:
+        loss_sum = loss_sum + sq_err[cursor_active, :2].sum()
+        active_count += cursor_count * 2
+
+    scroll_count = int(scroll_active.sum().item())
+    if scroll_count > 0:
+        loss_sum = loss_sum + sq_err[scroll_active, 2:].sum()
+        active_count += scroll_count * 2
+
+    if active_count == 0:
+        return dxdy_pred.sum() * 0.0, 0
+
+    return loss_sum / active_count, active_count
+
+
 @torch.no_grad()
 def evaluate(
     model: nn.Module,
@@ -338,10 +380,10 @@ def evaluate(
     action_loss_fn: nn.Module,
     dxdy_mean: torch.Tensor,
     dxdy_std: torch.Tensor,
+    mask_zero_dxdy_groups: bool = False,
 ) -> dict[str, object]:
     """Evaluate model on validation set."""
     model.eval()
-    dxdy_loss_fn = nn.MSELoss()
 
     all_movement_preds = []
     all_movement_targets = []
@@ -353,6 +395,8 @@ def evaluate(
     all_dxdy_targets_denorm = []
     total_action_loss = 0.0
     total_dxdy_loss = 0.0
+    total_dxdy_loss_weighted = 0.0
+    total_dxdy_weight = 0
 
     for batch in dataloader:
         emg = batch["emg"].to(device)
@@ -364,7 +408,19 @@ def evaluate(
         dxdy_pred = out["dxdy"]
 
         total_action_loss += action_loss_fn(action_logits, action_targets).item()
-        total_dxdy_loss += dxdy_loss_fn(dxdy_pred, dxdy_targets).item()
+        dxdy_loss, dxdy_count = compute_dxdy_loss(
+            dxdy_pred=dxdy_pred,
+            dxdy_targets=dxdy_targets,
+            dxdy_mean=dxdy_mean,
+            dxdy_std=dxdy_std,
+            mask_zero_dxdy_groups=mask_zero_dxdy_groups,
+        )
+        if mask_zero_dxdy_groups:
+            if dxdy_count > 0:
+                total_dxdy_loss_weighted += dxdy_loss.item() * dxdy_count
+                total_dxdy_weight += dxdy_count
+        else:
+            total_dxdy_loss += dxdy_loss.item()
 
         action_probs = torch.sigmoid(action_logits)
         dxdy_pred_denorm = dxdy_pred * dxdy_std + dxdy_mean
@@ -387,9 +443,17 @@ def evaluate(
     click_preds = torch.cat(all_click_preds)
     click_targets = torch.cat(all_click_targets)
 
+    if mask_zero_dxdy_groups:
+        if total_dxdy_weight > 0:
+            dxdy_loss_metric = total_dxdy_loss_weighted / total_dxdy_weight
+        else:
+            dxdy_loss_metric = 0.0
+    else:
+        dxdy_loss_metric = total_dxdy_loss / len(dataloader)
+
     metrics: dict[str, object] = {
         "action_loss": total_action_loss / len(dataloader),
-        "dxdy_loss": total_dxdy_loss / len(dataloader),
+        "dxdy_loss": dxdy_loss_metric,
     }
 
     movement_metrics = compute_group_metrics(
@@ -518,7 +582,6 @@ def train(cfg: DictConfig):
 
     # Loss functions
     num_actions = len(ACTION_NAMES)
-    dxdy_loss_fn = nn.MSELoss()
 
     # BCE loss with optional pos_weight for class imbalance
     if cfg.training.use_class_weights:
@@ -533,6 +596,11 @@ def train(cfg: DictConfig):
     # Loss weights
     action_weight = cfg.training.get("action_loss_weight", 1.0)
     dxdy_weight = cfg.training.get("dxdy_loss_weight", 1.0)
+    mask_zero_dxdy_groups = cfg.training.get("mask_zero_dxdy_groups", False)
+    if mask_zero_dxdy_groups:
+        logger.info(
+            "Using masked dxdy loss: skip cursor/scroll groups when both target components are zero"
+        )
     dxdy_mean = torch.tensor(dataset.dxdy_mean, dtype=torch.float32, device=device)
     dxdy_std = torch.tensor(dataset.dxdy_std, dtype=torch.float32, device=device)
 
@@ -559,7 +627,13 @@ def train(cfg: DictConfig):
             dxdy_pred = out["dxdy"]
 
             action_loss = action_loss_fn(action_logits, action_targets)
-            dxdy_loss = dxdy_loss_fn(dxdy_pred, dxdy_targets)
+            dxdy_loss, _ = compute_dxdy_loss(
+                dxdy_pred=dxdy_pred,
+                dxdy_targets=dxdy_targets,
+                dxdy_mean=dxdy_mean,
+                dxdy_std=dxdy_std,
+                mask_zero_dxdy_groups=mask_zero_dxdy_groups,
+            )
             loss = action_weight * action_loss + dxdy_weight * dxdy_loss
 
             loss.backward()
@@ -591,7 +665,13 @@ def train(cfg: DictConfig):
         # Evaluation
         if (epoch + 1) % cfg.training.eval_interval == 0:
             metrics = evaluate(
-                model, eval_loader, device, action_loss_fn, dxdy_mean, dxdy_std
+                model,
+                eval_loader,
+                device,
+                action_loss_fn,
+                dxdy_mean,
+                dxdy_std,
+                mask_zero_dxdy_groups=mask_zero_dxdy_groups,
             )
             logger.info(
                 f"[Eval] Action Loss: {metrics['action_loss']:.4f} | "
