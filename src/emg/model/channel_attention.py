@@ -2,7 +2,6 @@ import math
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from einops import rearrange
 
 from emg.util.mlp import mlp
@@ -29,7 +28,6 @@ class STFTFeatures(nn.Module):
     def forward(self, emg: torch.Tensor) -> torch.Tensor:
         batch_size, num_channels, _ = emg.shape
         emg = rearrange(emg, "b c t -> (b c) t")
-        emg = F.normalize(emg, dim=-1)
 
         spectrum = torch.stft(
             emg,
