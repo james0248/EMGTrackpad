@@ -80,7 +80,6 @@ class _ChannelAttentionEncoderLayer(nn.Module):
         dropout: float,
     ):
         super().__init__()
-        self.attn_norm = nn.LayerNorm(d_model)
         self.self_attn = nn.MultiheadAttention(
             embed_dim=d_model,
             num_heads=num_heads,
