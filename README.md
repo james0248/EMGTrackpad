@@ -29,7 +29,7 @@ The repo has two components:
 
 ```bash
 git clone https://github.com/your-username/EMGTrackpad.git
-cd EMGTrackpad && uv sync
+cd EMGTrackpad && uv sync && uv pip install .
 cd apps/platform && bun i
 ```
 
