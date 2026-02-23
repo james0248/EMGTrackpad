@@ -1,10 +1,13 @@
 import math
+from typing import Literal
 
 import torch
 import torch.nn as nn
 from einops import rearrange
 
 from emg.util.mlp import mlp
+
+ChannelPoolingMode = Literal["mean", "cls"]
 
 
 class STFTFeatures(nn.Module):
@@ -154,7 +157,7 @@ def _compute_num_time_frames(
 
 
 class ChannelAttentionFeatures(nn.Module):
-    """STFT feature extractor with transformer encoder applied across channels."""
+    """STFT features + channel transformer with configurable channel pooling."""
 
     def __init__(
         self,
@@ -168,13 +171,20 @@ class ChannelAttentionFeatures(nn.Module):
         num_layers: int,
         dim_feedforward: int,
         dropout: float,
+        pooling: ChannelPoolingMode = "mean",
         spec_augment: nn.Module | None = None,
     ):
         super().__init__()
+        if pooling not in ("mean", "cls"):
+            raise ValueError(
+                f"Invalid pooling mode: {pooling}. Expected one of: mean, cls."
+            )
+
         self.num_channels = num_channels
         self.emg_sample_rate = emg_sample_rate
         self.window_length_s = window_length_s
         self.d_model = d_model
+        self.pooling = pooling
         self.num_time_frames = _compute_num_time_frames(
             window_length_s=window_length_s,
             emg_sample_rate=emg_sample_rate,
@@ -200,13 +210,18 @@ class ChannelAttentionFeatures(nn.Module):
             dim_feedforward=dim_feedforward,
             dropout=dropout,
         )
+        if self.pooling == "cls":
+            self.cls_token = nn.Parameter(torch.zeros(1, 1, d_model))
+            nn.init.trunc_normal_(self.cls_token, std=0.02)
+        else:
+            self.register_parameter("cls_token", None)
 
     @property
     def device(self) -> torch.device:
         return next(self.parameters()).device
 
     def forward(self, emg: torch.Tensor) -> torch.Tensor:
-        """Return time-preserving pooled features of shape (batch, time, d_model)."""
+        """Return pooled features of shape (batch, time, d_model)."""
         batch_size = emg.shape[0]
 
         stft = self.stft_features(emg)  # (b, c, t, f)
@@ -217,9 +232,15 @@ class ChannelAttentionFeatures(nn.Module):
 
         # Channel-wise attention per time frame.
         x = rearrange(x, "b c t d -> (b t) c d")
+        if self.pooling == "cls":
+            cls_tokens = self.cls_token.expand(x.shape[0], -1, -1)
+            x = torch.cat((cls_tokens, x), dim=1)
         x = self.transformer(x)
 
-        x = x.mean(dim=1)  # pool channels
+        if self.pooling == "cls":
+            x = x[:, 0, :]
+        else:
+            x = x.mean(dim=1)
         x = rearrange(x, "(b t) d -> b t d", b=batch_size, t=num_time_frames)
         return x
 
@@ -240,6 +261,7 @@ class ChannelAttentionMLPController(nn.Module):
         dim_feedforward: int,
         hidden_dims: list[int],
         dropout: float = 0.0,
+        pooling: ChannelPoolingMode = "mean",
         spec_augment: nn.Module | None = None,
     ):
         super().__init__()
@@ -257,6 +279,7 @@ class ChannelAttentionMLPController(nn.Module):
             num_layers=num_layers,
             dim_feedforward=dim_feedforward,
             dropout=dropout,
+            pooling=pooling,
             spec_augment=spec_augment,
         )
 
@@ -311,6 +334,7 @@ class ChannelAttentionLSTMController(nn.Module):
         lstm_hidden_dim: int,
         lstm_num_layers: int,
         dropout: float = 0.1,
+        pooling: ChannelPoolingMode = "mean",
         spec_augment: nn.Module | None = None,
     ):
         super().__init__()
@@ -326,6 +350,7 @@ class ChannelAttentionLSTMController(nn.Module):
             num_layers=num_layers,
             dim_feedforward=dim_feedforward,
             dropout=dropout,
+            pooling=pooling,
             spec_augment=spec_augment,
         )
         self.projection = nn.Linear(d_model, projection_dim)
