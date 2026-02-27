@@ -1,4 +1,5 @@
 # EMGTrackpad
+[[Demo](https://youtube.com/shorts/DPg00QwLYF4?feature=share)]
 
 Decode motor intention from forearm surface EMG signals to control a macOS trackpad in real time.
 
